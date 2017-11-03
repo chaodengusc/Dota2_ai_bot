@@ -16,7 +16,7 @@ class DotaEnv:
 
   def __init__(self):
     self.view = None
-    self.views = [pg.screenshot()]
+    self.views = [np.array(pg.screenshot())]
     self.memory = []
     self.UI = DotaUI(self.views[0])
     self.score = self.UI.get_score()
@@ -27,7 +27,7 @@ class DotaEnv:
   ## update once the bot makes an action
   def update(self):
     ## screenshot corresponds to the action by the bot
-    self.view = pg.screenshot()
+    self.view = np.array(pg.screenshot())
     self.UI.update(self.view)
     self.update_views(self.views)
     score = self.score
@@ -63,7 +63,7 @@ class DotaBot:
     x = np.random.randint(UI.weight, size=3)
     y = np.random.randint(UI.height, size=3)
     buttons = ['left' if i==0 else 'right' \
-      for i in np.random.randint(2, size=3)
+      for i in np.random.randint(2, size=3)]
     return [(x[i], y[i], buttons[i]) for i in range(3)]
 
   ## execute the commands
@@ -109,6 +109,28 @@ class DotaUI:
   DISCONNECT = (1676, 1036)
   LOCK_IN = (1473, 804)
 
+  ## regions
+  HP_REGION = tuple([(i, 1020, 12, 20) for i in range(984, 943, -10)])
+  ## the digit and its feature for hp
+  ## (0, 0) means no digit in the figure
+#  HP_DIGITS = {(16, 18):0, (9, 6):1, (11, 17):2, (10, 15):3, (8:18):4, 
+#              (12, 16):5, (10, 18):6, (12, 7):7, (16, 19):8, (15, 12):9, (0, 0):0}
+  HP_DIGITS = dict(zip([75030, 69872, 76838, 77303, 74662, 76570, 79967, 
+                        71074, 82300, 78704], range(10)))
+
+  LVL_REGION = (598, 1046, 24, 20)
+  ## the digit and its feature for lvl
+  LVL_DIGITS = dict(zip([34514, 50320, 47276, 47593, 49772, 53297, 40642, 59439,
+                         51928, 85645, 67183, 80362, 78174, 77916, 80040, 82476,
+                         71740, 88125, 81374, 98408, 81196, 93589, 91638, 91665,
+                         93173], range(1, 26)))
+
+  TIME_REGION = tuple([(i, 22, 9, 18) for i in (970, 962, 949, 941)])
+  ## the digit and its feature for time
+  TIME_DIGITS = dict(zip([51460, 43591, 48149, 46679, 47013, 49132, 49033,
+                          44022, 52326, 49675], range(10)))
+
+
   def __init__(self, view):
     self.view = view
     self.width, self.height = pyautogui.size()
@@ -117,19 +139,51 @@ class DotaUI:
     self.view = view
 
   def get_hp(self):
-    pass
+    digits = []
+    for i in HP_REGION:
+      region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
+#      z = np.sum(region, axis=2)
+#      f1 = np.sum(z[0:z.shape[0]//2, :]==765)
+#      f2 = np.sum(z[z.shape[0]//2:z.shape[0] , :]==765)
+#      digits.apend(HP_DIGITS[(f1, f2)])
+      z = np.sum(region)
+      if z in HP_DIGITS:
+        digits.apend(HP_DIGITS[z])
+      else:
+        digits.apend(0)
+
+    num = 0
+    for i in range(len(digits)):
+      num += 10^i * digits[i]
+    return num
 
   def get_gold(self):
-    pass
+    ## TODO
+    return 1
 
   def get_lvl(self):
-    pass
+    i = LVL_REGION
+    region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
+    z = np.sum(region)
+    return LVL_DIGIS[z]
 
   def get_ability_lvl(self):
-    pass
+    ## TODO
+    return 1
   
   def get_time(self):
-    pass
+    digits = []
+    for i in HP_REGION:
+      region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
+      z = np.sum(region)
+      if z in TIME_DIGITS:
+        digits.apend(HP_DIGITS[(f1, f2)])
+      else:
+        digits.apend(0)
+
+    time = digits[0] + digits[1] * 10
+    time += (digits[2] + digits[3] * 10) * 60
+    return time
 
   def get_score(self):
     gold = UI.get_gold()
