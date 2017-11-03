@@ -1,5 +1,6 @@
 import time
 import pyautogui as pg
+from dota_model import DotaBot
 
 class DotaGame:
   MEMORY_LIMIT = 1000  # the maximum length of the track (state, action, reward)

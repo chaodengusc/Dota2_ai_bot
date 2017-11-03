@@ -133,7 +133,7 @@ class DotaUI:
 
   def __init__(self, view):
     self.view = view
-    self.width, self.height = pyautogui.size()
+    self.width, self.height = pg.size()
 
   def update(self, view):
     self.view = view
@@ -186,8 +186,8 @@ class DotaUI:
     return time
 
   def get_score(self):
-    gold = UI.get_gold()
-    ability_lvl = UI.get_ability_lvl()
-    lvl = UI.get_lvl()
+    gold = self.get_gold()
+    ability_lvl = self.get_ability_lvl()
+    lvl = self.get_lvl()
     score = gold * (lvl + ability_lvl)
     return score
