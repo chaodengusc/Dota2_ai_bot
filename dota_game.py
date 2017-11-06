@@ -34,7 +34,7 @@ class DotaGame:
         self.bot.onestep()
         self.env.update()
         reward = self.env.reward
-        if len(self.memory) >= MEMORY_LIMIT:
+        if len(self.memory) >= self.MEMORY_LIMIT:
           ## randomly throw away old record
           i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
           self.memory.pop(i)

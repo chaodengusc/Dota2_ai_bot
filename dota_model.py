@@ -22,7 +22,7 @@ class DotaEnv:
     self.score = self.UI.get_score()
     self.reward = 0
     time = self.UI.get_time()
-    self.RECENT_MEMORY = 1 # things happend recently
+    self.RECENT_MEMORY = 1 # things happened recently
 
   ## update once the bot makes an action
   def update(self):
@@ -40,7 +40,7 @@ class DotaEnv:
     self.time = self.UI.get_time()
 
   def update_views(self, view):
-    if len(self.views) >= VIEWS_LIMIT:
+    if len(self.views) >= self.VIEWS_LIMIT:
       ## randomly remove an old view, but not the very recent ones
       ## RECENT_ONES = 0 means every view is considered old
       i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
@@ -96,6 +96,9 @@ class DotaBot:
   def get_state(self):
     return self.env.views[-1]
 
+  def get_UI(self):
+    return self.env.UI
+
 
 class DotaUI:
   ## coordinates of key components in Dota 2
@@ -140,15 +143,15 @@ class DotaUI:
 
   def get_hp(self):
     digits = []
-    for i in HP_REGION:
+    for i in self.HP_REGION:
       region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
 #      z = np.sum(region, axis=2)
 #      f1 = np.sum(z[0:z.shape[0]//2, :]==765)
 #      f2 = np.sum(z[z.shape[0]//2:z.shape[0] , :]==765)
 #      digits.apend(HP_DIGITS[(f1, f2)])
       z = np.sum(region)
-      if z in HP_DIGITS:
-        digits.apend(HP_DIGITS[z])
+      if z in self.HP_DIGITS:
+        digits.apend(self.HP_DIGITS[z])
       else:
         digits.apend(0)
 
@@ -162,10 +165,14 @@ class DotaUI:
     return 1
 
   def get_lvl(self):
-    i = LVL_REGION
+    i = self.LVL_REGION
     region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
     z = np.sum(region)
-    return LVL_DIGIS[z]
+    if z in self.LVL_DIGITS:
+      lvl = self.LVL_DIGITS[z]
+    else:
+      lvl = 0
+    return lvl
 
   def get_ability_lvl(self):
     ## TODO
@@ -173,13 +180,13 @@ class DotaUI:
   
   def get_time(self):
     digits = []
-    for i in HP_REGION:
+    for i in self.TIME_REGION:
       region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
       z = np.sum(region)
-      if z in TIME_DIGITS:
-        digits.apend(HP_DIGITS[(f1, f2)])
+      if z in self.TIME_DIGITS:
+        digits.apend(self.TIME_DIGITS[(f1, f2)])
       else:
-        digits.apend(0)
+        digits.append(0)
 
     time = digits[0] + digits[1] * 10
     time += (digits[2] + digits[3] * 10) * 60
