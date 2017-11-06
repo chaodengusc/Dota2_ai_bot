@@ -6,10 +6,9 @@ import pyautogui as pg
 class DotaEnv:
   TIME_LIMIT = 600
   ## time interval between two actions by pyautogui
-  ## TODO: tune this parameter
-  pg.PAUSE = 0.1
   ## set true to raise an exception at (0, 0)
-  pg.FAILSAFE = False
+  pg.Pause = 0
+  pg.FAILSAFE = True
   time = None  # time in the game
 
   VIEWS_LIMIT = 100  # the maximum number of screenshots
@@ -17,7 +16,6 @@ class DotaEnv:
   def __init__(self):
     self.view = None
     self.views = [np.array(pg.screenshot())]
-    self.memory = []
     self.UI = DotaUI(self.views[0])
     self.score = self.UI.get_score()
     self.reward = 0
@@ -43,7 +41,7 @@ class DotaEnv:
     if len(self.views) >= self.VIEWS_LIMIT:
       ## randomly remove an old view, but not the very recent ones
       ## RECENT_ONES = 0 means every view is considered old
-      i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
+      i = np.random.randint(len(self.views) - self.RECENT_MEMORY)
       self.views.pop(i)
     self.views.append(view)
 
@@ -60,7 +58,7 @@ class DotaBot:
     ## TODO
     UI = self.get_UI()
     ## magic number 3 indicates a large operation space
-    x = np.random.randint(UI.weight, size=3)
+    x = np.random.randint(UI.width, size=3)
     y = np.random.randint(UI.height, size=3)
     buttons = ['left' if i==0 else 'right' \
       for i in np.random.randint(2, size=3)]
@@ -68,19 +66,15 @@ class DotaBot:
 
   ## execute the commands
   def execute(self, commands):
+    ## TODO: tune the parameter
+    pg.PAUSE = 1
     for i in commands:
       pg.click(x=i[0], y=i[1], button=i[2])
 
   ## interpret the commands and execute them
   def onestep(self):
     UI = self.get_UI()
-    ## right click to select the hero
-    x, y = pg.position()
-    pg.click(x=x, y=y, button='right')
-    ## left click the picture of the hero in the UI to put the hero
-    ## in the center of the camera
-    x, y = UI.hero_picture
-    pg.click(x=x, y=x, button='left')
+    self.center_hero()
 
     ## generate the commands based on the current state
     self.state = self.get_state()
@@ -98,6 +92,24 @@ class DotaBot:
 
   def get_UI(self):
     return self.env.UI
+
+  ## put hero in the center of the camera
+  def center_hero(self):
+    tmp = pg.PAUSE
+    pg.PAUSE = 0
+    for i in range(570, 820, 60):
+      pg.click(x=i, y=20, button='left')
+    for i in range(1095, 1345, 60):
+      pg.click(x=i, y=20, button='left')
+    pg.click(x=880, y=20, button='right')
+    ## left click the picture of the hero in the UI to put the hero
+    ## in the center of the camera
+    HERO_PICTURE = (634, 1002)
+    pg.click(x=HERO_PICTURE[0], y=HERO_PICTURE[1], button='left')
+    pg.PAUSE = tmp
+    
+
+    
 
 
 class DotaUI:
@@ -144,7 +156,7 @@ class DotaUI:
   def get_hp(self):
     digits = []
     for i in self.HP_REGION:
-      region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
+      region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
 #      z = np.sum(region, axis=2)
 #      f1 = np.sum(z[0:z.shape[0]//2, :]==765)
 #      f2 = np.sum(z[z.shape[0]//2:z.shape[0] , :]==765)
@@ -166,7 +178,7 @@ class DotaUI:
 
   def get_lvl(self):
     i = self.LVL_REGION
-    region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
+    region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
     z = np.sum(region)
     if z in self.LVL_DIGITS:
       lvl = self.LVL_DIGITS[z]
@@ -181,7 +193,7 @@ class DotaUI:
   def get_time(self):
     digits = []
     for i in self.TIME_REGION:
-      region = self.view[i[0]:i[1],i[0]+i[2]:i[1]+i[3], 0:3]
+      region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
       z = np.sum(region)
       if z in self.TIME_DIGITS:
         digits.apend(self.TIME_DIGITS[(f1, f2)])

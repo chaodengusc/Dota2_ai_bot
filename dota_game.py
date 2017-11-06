@@ -11,28 +11,27 @@ class DotaGame:
     self.RECENT_MEMORY = 1
 
   def relaunch(self):
+    tmp = pg.Pause
     UI = self.bot.UI
-    time.sleep(20)
+    pg.Pause = 3
     x, y = BACK_TO_DASHBOARD; pg.click(x, y, button="left")
-    time.sleep(10)
     x, y = DISCONNECT; pg.click(x, y, button="left")
-    time.sleep(10)
     x, y = PLAY_DOTA; pg.click(x, y, button="left")
-    time.sleep(5)
     x, y = CREATE_LOBBY; pg.click(x, y, button="left")
-    time.sleep(5)
+    pg.Pause = 20
     x, y = START_GAME; pg.click(x, y, button="left")
-    time.sleep(30)
+    pg.Pause = 10
     x, y = MIRANA; pg.click(x, y, button="left")
-    time.sleep(10)
     x, y = SKIP_AHEAD; pg.click(x, y, button="left")
+    pg.Pause = tmp
+    self.train()
 
   def train(self):
     try:
-      time = self.env.get_time()
+      time = self.bot.env.get_time()
       while time < self.env.MEMORY_LIMIT:
         self.bot.onestep()
-        self.env.update()
+        self.bot.env.update()
         reward = self.env.reward
         if len(self.memory) >= self.MEMORY_LIMIT:
           ## randomly throw away old record
@@ -41,10 +40,10 @@ class DotaGame:
           self.memory.append((self.env.state, self.env.commands, reward))
       self.relaunch()
     except KeyboardInterrupt:
-      print("Done one game \n")
+      print("Done one training\n")
  
 
-    if len(self.memory) >= MEMORY_LIMIT:
+    if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
       self.memory.pop(i)
@@ -54,11 +53,12 @@ class DotaGame:
     try:
       while True:
         self.bot.onestep()
-        self.env.update()
+        self.bot.env.update()
     except KeyboardInterrupt:
       print("Done one game \n")
 
 
 if __name__ == "__main__":
+  time.sleep(3)
   game = DotaGame()
   game.play()
