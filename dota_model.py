@@ -7,9 +7,9 @@ class DotaEnv:
   TIME_LIMIT = 600
   ## time interval between two actions by pyautogui
   ## set true to raise an exception at (0, 0)
-  pg.Pause = 0
+  pg.PAUSE = 0
   pg.FAILSAFE = True
-  time = None  # time in the game
+  over_time = None  # time in the game
 
   VIEWS_LIMIT = 100  # the maximum number of screenshots
 
@@ -19,7 +19,7 @@ class DotaEnv:
     self.UI = DotaUI(self.views[0])
     self.score = self.UI.get_score()
     self.reward = 0
-    time = self.UI.get_time()
+    self.over_time = self.UI.check_time()
     self.RECENT_MEMORY = 1 # things happened recently
 
   ## update once the bot makes an action
@@ -35,7 +35,7 @@ class DotaEnv:
       self.reward = 0
     else:
       self.reward = self.score - score
-    self.time = self.UI.get_time()
+    self.over_time = self.UI.check_time()
 
   def update_views(self, view):
     if len(self.views) >= self.VIEWS_LIMIT:
@@ -109,9 +109,6 @@ class DotaBot:
     pg.PAUSE = tmp
     
 
-    
-
-
 class DotaUI:
   ## coordinates of key components in Dota 2
   CONTINUE = (956, 904)
@@ -122,17 +119,15 @@ class DotaUI:
   SKIP_AHEAD = (163, 791)
   BACK_TO_DASHBOARD = (31, 27)
   DISCONNECT = (1676, 1036)
+  YES_DISCONNECT = (860, 632)
   LOCK_IN = (1473, 804)
 
   ## regions
   HP_REGION = tuple([(i, 1020, 12, 20) for i in range(920, 879, -10)])
-  ## the digit and its feature for hp
-  ## (0, 0) means no digit in the figure
   HP_DIGITS = {(16, 18):0, (9, 6):1, (11, 17):2, (10, 15):3, (8, 18):4, 
-               (12, 16):5, (10, 18):6, (12, 7):7, (16, 19):8, (15, 12):9, (0, 0):0}
-#  HP_DIGITS = dict(zip([75030, 69872, 76838, 77303, 74662, 76570, 79967, 
-#                        71074, 82300, 78704], range(10)))
-
+               (12, 16):5, (10, 18):6, (12, 7):7, (16, 19):8, (15, 12):9}
+  
+  ## the digit for game time; one unit means 10 mins 
   LVL_REGION = (598, 1046, 24, 20)
   ## the digit and its feature for lvl
   LVL_DIGITS = dict(zip([34514, 50320, 47276, 47593, 49772, 53297, 40642, 59439,
@@ -140,11 +135,8 @@ class DotaUI:
                          71740, 88125, 81374, 98408, 81196, 93589, 91638, 91665,
                          93173], range(1, 26)))
 
-  TIME_REGION = tuple([(i, 22, 9, 18) for i in (970, 962, 949, 941)])
-  ## the digit and its feature for time
-  TIME_DIGITS = dict(zip([51460, 43591, 48149, 46679, 47013, 49132, 49033,
-                          44022, 52326, 49675], range(10)))
-
+  ## the digit for minute
+  TIME_REGION = (941, 22, 9, 18)
 
   def __init__(self, view):
     self.view = view
@@ -164,11 +156,6 @@ class DotaUI:
         digits.append(self.HP_DIGITS[(f1, f2)])
       else:
         digits.append(0)
-#      z = np.sum(region)
-#      if z in self.HP_DIGITS:
-#        digits.append(self.HP_DIGITS[z])
-#      else:
-#        digits.append(0)
 
     num = 0
     for i in range(len(digits)):
@@ -193,19 +180,17 @@ class DotaUI:
     ## TODO
     return 1
   
-  def get_time(self):
+  ## check if the game time is over 10 mins
+  def check_time(self):
     digits = []
-    for i in self.TIME_REGION:
-      region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
-      z = np.sum(region)
-      if z in self.TIME_DIGITS:
-        digits.apend(self.TIME_DIGITS[(f1, f2)])
-      else:
-        digits.append(0)
-
-    time = digits[0] + digits[1] * 10
-    time += (digits[2] + digits[3] * 10) * 60
-    return time
+    i = self.TIME_REGION
+    region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
+    z = np.sum(region, axis=2)
+    ## game has played for 10 mins
+    if np.sum(z > 720) == 12:
+      return 1
+    else:
+      return 0
 
   def get_score(self):
     gold = self.get_gold()
