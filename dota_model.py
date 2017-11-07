@@ -125,13 +125,13 @@ class DotaUI:
   LOCK_IN = (1473, 804)
 
   ## regions
-  HP_REGION = tuple([(i, 1020, 12, 20) for i in range(984, 943, -10)])
+  HP_REGION = tuple([(i, 1020, 12, 20) for i in range(920, 879, -10)])
   ## the digit and its feature for hp
   ## (0, 0) means no digit in the figure
-#  HP_DIGITS = {(16, 18):0, (9, 6):1, (11, 17):2, (10, 15):3, (8:18):4, 
-#              (12, 16):5, (10, 18):6, (12, 7):7, (16, 19):8, (15, 12):9, (0, 0):0}
-  HP_DIGITS = dict(zip([75030, 69872, 76838, 77303, 74662, 76570, 79967, 
-                        71074, 82300, 78704], range(10)))
+  HP_DIGITS = {(16, 18):0, (9, 6):1, (11, 17):2, (10, 15):3, (8, 18):4, 
+               (12, 16):5, (10, 18):6, (12, 7):7, (16, 19):8, (15, 12):9, (0, 0):0}
+#  HP_DIGITS = dict(zip([75030, 69872, 76838, 77303, 74662, 76570, 79967, 
+#                        71074, 82300, 78704], range(10)))
 
   LVL_REGION = (598, 1046, 24, 20)
   ## the digit and its feature for lvl
@@ -157,19 +157,22 @@ class DotaUI:
     digits = []
     for i in self.HP_REGION:
       region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
-#      z = np.sum(region, axis=2)
-#      f1 = np.sum(z[0:z.shape[0]//2, :]==765)
-#      f2 = np.sum(z[z.shape[0]//2:z.shape[0] , :]==765)
-#      digits.apend(HP_DIGITS[(f1, f2)])
-      z = np.sum(region)
-      if z in self.HP_DIGITS:
-        digits.apend(self.HP_DIGITS[z])
+      z = np.sum(region, axis=2)
+      f1 = np.sum(z[0:z.shape[0]//2, :]==765)
+      f2 = np.sum(z[z.shape[0]//2:z.shape[0] , :]==765)
+      if (f1, f2) in self.HP_DIGITS:
+        digits.append(self.HP_DIGITS[(f1, f2)])
       else:
-        digits.apend(0)
+        digits.append(0)
+#      z = np.sum(region)
+#      if z in self.HP_DIGITS:
+#        digits.append(self.HP_DIGITS[z])
+#      else:
+#        digits.append(0)
 
     num = 0
     for i in range(len(digits)):
-      num += 10^i * digits[i]
+      num += 10**i * digits[i]
     return num
 
   def get_gold(self):
