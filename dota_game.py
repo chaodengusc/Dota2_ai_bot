@@ -27,6 +27,8 @@ class DotaGame:
     pg.PAUSE = 10
     x, y = UI.SKIP_AHEAD; pg.click(x, y, button="left")
     pg.PAUSE = tmp
+    ## reset the time
+    self.bot.env.over_time = 0
     self.train()
 
   def train(self):
