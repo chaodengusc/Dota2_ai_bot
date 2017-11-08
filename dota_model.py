@@ -15,6 +15,7 @@ class DotaEnv:
 
   def __init__(self):
     self.view = None
+    self.center_hero()
     self.views = [np.array(pg.screenshot())]
     self.UI = DotaUI(self.views[0])
     self.score = self.UI.get_score()
@@ -24,6 +25,7 @@ class DotaEnv:
 
   ## update once the bot makes an action
   def update(self):
+    self.center_hero()
     ## screenshot corresponds to the action by the bot
     self.view = np.array(pg.screenshot())
     self.UI.update(self.view)
@@ -82,9 +84,11 @@ class DotaBot:
     self.execute(self.commands)
 
   def get_parameters(self):
+    ## TODO
     return self.parameters
 
   def set_parameters(self, parameters):
+    ## TODO
     pass
 
   def get_state(self):
@@ -105,6 +109,7 @@ class DotaBot:
     ## left click the picture of the hero in the UI to put the hero
     ## in the center of the camera
     HERO_PICTURE = (634, 1002)
+    pg.PAUSE = 0.1
     pg.click(x=HERO_PICTURE[0], y=HERO_PICTURE[1], button='left')
     pg.PAUSE = tmp
     
@@ -138,6 +143,22 @@ class DotaUI:
   ## the digit for minute
   TIME_REGION = (941, 22, 9, 18)
 
+  ## ability point
+  ABILITIES = [(i, 1009) for i in range(855, 889, 11)] + \
+              [(i, 1009) for i in range(920, 954, 11)] + \
+              [(i, 1009) for i in range(985, 1019, 11)] + \
+              [(i, 1009) for i in range(1055, 1078, 11)]
+  ## the color (RGB) for unlock an ability
+  UNLOCK_ABILITY = (180, 162, 106)
+
+  ## gold region
+  GOLD_REGION = [(i, 1040, 13, 20) for i in range(1737, 1684, -13)]
+  ## the digit and its featurs for gold
+  GOLD_DIGITS = dict(zip([(16, 22, 15), (11, 12, 8), (15, 11, 20), (12, 13, 15),
+                          (5, 21, 6), (10, 15, 15), (8, 21, 14), (12, 10, 8),
+                          (16, 24, 16), (15, 22, 8)], range(10)))
+  
+
   def __init__(self, view):
     self.view = view
     self.width, self.height = pg.size()
@@ -163,8 +184,28 @@ class DotaUI:
     return num
 
   def get_gold(self):
-    ## TODO
-    return 1
+    digits = []
+    ## magic position
+    indicator_spot = (1060, 1785)
+    if np.sum(self.view[indicator_spot[0], indicator_spot[1], ]) == 440:
+      pixel_color = 765
+    else:
+      pixel_color = 510
+    for i in self.GOLD_REGION:
+      region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
+      z = np.sum(region, axis=2)
+      f1 = np.sum(z[0:z.shape[0]//3,]==pixel_color)
+      f2 = np.sum(z[z.shape[0]//3:z.shape[0]//3*2,]==pixel_color)
+      f3 = np.sum(z[z.shape[0]//3*2:z.shape[0], ]==pixel_color)
+      if (f1, f2, f3) in self.GOLD_DIGITS:
+        digits.append(self.GOLD_DIGITS[(f1, f2, f3)])
+      else:
+        digits.append(0)
+
+    num = 0
+    for i in range(len(digits)):
+      num += 10**i * digits[i]
+    return num
 
   def get_lvl(self):
     i = self.LVL_REGION
@@ -176,9 +217,10 @@ class DotaUI:
       lvl = 0
     return lvl
 
-  def get_ability_lvl(self):
-    ## TODO
-    return 1
+  def unlock_ability(self):
+    unlock_ability = [all(self.view[x, y, ]== self.UNLOCK_ABILITY) \
+                      for y, x in self.ABILITIES]
+    return np.sum(unlock_ability)
   
   ## check if the game time is over 10 mins
   def check_time(self):
@@ -194,7 +236,7 @@ class DotaUI:
 
   def get_score(self):
     gold = self.get_gold()
-    ability_lvl = self.get_ability_lvl()
+    ability_lvl = self.unlock_ability()
     lvl = self.get_lvl()
     score = gold * (lvl + ability_lvl)
     return score
