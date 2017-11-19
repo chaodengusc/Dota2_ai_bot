@@ -5,6 +5,23 @@ import tensorflow as tf
 pg.PAUSE = 0
 pg.FAILSAFE = True
 
+## put hero in the center of the camera
+def center_hero():
+  tmp = pg.PAUSE
+  pg.PAUSE = 0
+  for i in range(570, 820, 60):
+    pg.click(x=i, y=20, button='left')
+  for i in range(1095, 1345, 60):
+    pg.click(x=i, y=20, button='left')
+  pg.click(x=880, y=20, button='right')
+  ## left click the picture of the hero in the UI to put the hero
+  ## in the center of the camera
+  HERO_PICTURE = (634, 1002)
+  pg.PAUSE = 0.1
+  pg.click(x=HERO_PICTURE[0], y=HERO_PICTURE[1], button='left')
+  pg.PAUSE = tmp
+
+
 ## Dota 2 environment
 ## features, the current state and environmental parameters for learning
 class DotaEnv:
@@ -14,7 +31,7 @@ class DotaEnv:
   over_time = None  # time in the game
 
   def __init__(self):
-    self.center_hero()
+    center_hero()
     self.views = [np.array(pg.screenshot())]
     tmp = pg.PAUSE
     pg.PAUSE = 0.1
@@ -39,7 +56,7 @@ class DotaEnv:
       self.reward = self.score - score
 
   def update_views(self):
-    self.center_hero()
+    center_hero()
     self.views = [np.array(pg.screenshot())]
     tmp = pg.PAUSE
     pg.PAUSE = 0.1
@@ -50,12 +67,12 @@ class DotaEnv:
 class DotaBot:
   def __init__(self):
     self.env = DotaEnv()
-    self.parameters = {}
+    self.policy = BotPolicy(self)
     self.state = None
     self.commands = None
 
   ## generate commands for the bot based on the current state
-  def policy(self):
+  def policy_complex(self):
     ## TODO
     UI = self.get_UI()
     ## magic number 3 indicates a large operation space
@@ -65,22 +82,18 @@ class DotaBot:
       for i in np.random.randint(2, size=3)]
     return [(x[i], y[i], buttons[i]) for i in range(3)]
 
-  ## execute the commands
-  def execute(self, commands):
-    ## TODO: tune the parameter
-    pg.PAUSE = 0.5
-    for i in commands:
-      pg.click(x=i[0], y=i[1], button=i[2])
-
   ## interpret the commands and execute them
-  def onestep(self):
+  def onestep(self, sess):
     UI = self.get_UI()
-    self.center_hero()
+    center_hero()
 
     ## generate the commands based on the current state
-    self.state = self.get_state()
-    self.commands = self.policy()
-    self.execute(self.commands)
+    policy = self.policy
+    self.state = policy.get_state()
+    fetches = [policy.model]
+    feed_dict = {state: self.state}
+    self.command = sess.run(fetches, feed_dict=feed_dict)
+    policy.execute(self.command)
 
   def get_parameters(self):
     ## TODO
@@ -96,22 +109,76 @@ class DotaBot:
   def get_UI(self):
     return self.env.UI
 
-  ## put hero in the center of the camera
-  def center_hero(self):
-    tmp = pg.PAUSE
-    pg.PAUSE = 0
-    for i in range(570, 820, 60):
-      pg.click(x=i, y=20, button='left')
-    for i in range(1095, 1345, 60):
-      pg.click(x=i, y=20, button='left')
-    pg.click(x=880, y=20, button='right')
-    ## left click the picture of the hero in the UI to put the hero
-    ## in the center of the camera
-    HERO_PICTURE = (634, 1002)
-    pg.PAUSE = 0.1
-    pg.click(x=HERO_PICTURE[0], y=HERO_PICTURE[1], button='left')
-    pg.PAUSE = tmp
+
+class BotPolicy:
+  BLACKPIXEL_PERCENT = 0.95
+  MEMORY_LIMIT = 1000
+  MEMORY_RETRIEVAL = 100
+  def __init__(self, bot):
+    self.memory = []
+    self.bot = bot
+    self.kernel_size = 50
+    self.filter_shape = [kernel_size, kernel_size, 1, 1]
+    self.w_conv = tf.get_variable('w_conv', self.filter_shape, tf.float32, \
+                                  tf.random_normal_initializer(0.0, 0.02))
+    self.w_fc = tf.get_variable('w_fc', [_width * _height, 3], tf.float32, \
+                                tf.random_normal_initializer(0.0, 0.02))
+    self.state = self.get_state()
+    self.learning_rate = 1e-5
+
+  def model(self):
+    state = tf.placeholder(tf.float32, [None, _width, _height])
+    conv1 = tf.nn.conv2d(state, self.w_conv, strides=[1,1,1,1], \
+                         padding='SAME', name='conv1')
+    relu1 = tf.nn.relu(conv1)
+    fc1 = tf.matmul(relu1, w_fc, a_is_sparse=True, name="fc1")
+    coef = tf.constant([_width, _height, 50])
+    output = tf.multiply(tf.tf.nn.sigmoid(x=fc1), coef)
+    return output
+
+  def loss(self):
+    self.loss_op = None
+    l = np.min(len(self.memory), self.MEMORY_RETRIEVAL)
+    index = [i-1 for i in range(-l)]
+    states = np.stack([self.memory[i][0] for i in index], axis=0)
+    commands = np.stack([self.memory[i][1] for i in index], axis=0) 
+    states_tf = tf.convert_to_tensor(states)
+    commands_tf = tf.convert_to_tensor(commands)
+    reward_tf = tf.convert_to_tensor(self.bot.env.reward)
+    self.loss_op = reward_tf * \
+      tf.losses.mean_squared_error(self.model(states_tf)[0:2], commands_tf)
+
+  def optimizer(self):
+    global_step = tf.Variable(0, trainable=False, name="counter")
+    self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(
+                      self.loss_op, global_step=global_step)
     
+  def get_state(self):
+    views = self.bot.env.views
+    UI = self.get_UI()
+    ## use the difference
+    X = (views[1] - views[0])
+    X = np.mean(X[:, :, 0:3], axis=2)
+    width_per_block, height_per_block = _width / 10, _height / 10
+
+    for i in range(0, _width, width_per_block):
+      for j in range(0, _height, height_per_block):
+        block = X[i:i+width_per_block, j:j+height_per_block]
+        ## set entire block to 0 if high percentage of pixels are 0
+        if np.sum(block == 0) / (width_per_block * height_per_block) > self.BLACKPIXEL_PERCENT:
+          X[i:i+width_per_block, j:j+height_per_block] = 0
+    return X
+
+  def get_command(self, mu1, mu2, sigma):
+    x, y = np.random.multivariate_normal([mu1, mu2], np.diag([sigma, sigma]))
+    return (x, y, 'right')
+
+  def execute(self, command):
+    ## TODO: tune the parameter
+    tmp = pg.PAUSE
+    pg.PAUSE = 0.7
+    pg.click(x=command[0], y=command[1], button=command[2])
+    pg.PAUSE = tmp
 
 class DotaUI:
   ## coordinates of key components in Dota 2
