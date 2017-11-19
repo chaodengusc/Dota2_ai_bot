@@ -1,5 +1,8 @@
 import numpy as np
 import pyautogui as pg
+import tensorflow as tf
+
+pg.PAUSE = 0
 
 ## Dota 2 environment
 ## features, the current state and environmental parameters for learning
@@ -7,7 +10,6 @@ class DotaEnv:
   TIME_LIMIT = 600
   ## time interval between two actions by pyautogui
   ## set true to raise an exception at (0, 0)
-  pg.PAUSE = 0
   pg.FAILSAFE = True
   over_time = None  # time in the game
 
@@ -69,7 +71,7 @@ class DotaBot:
   ## execute the commands
   def execute(self, commands):
     ## TODO: tune the parameter
-    pg.PAUSE = 1
+    pg.PAUSE = 0.5
     for i in commands:
       pg.click(x=i[0], y=i[1], button=i[2])
 
