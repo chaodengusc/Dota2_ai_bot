@@ -3,6 +3,7 @@ import pyautogui as pg
 import tensorflow as tf
 
 pg.PAUSE = 0
+pg.FAILSAFE = True
 
 ## Dota 2 environment
 ## features, the current state and environmental parameters for learning
@@ -10,28 +11,25 @@ class DotaEnv:
   TIME_LIMIT = 600
   ## time interval between two actions by pyautogui
   ## set true to raise an exception at (0, 0)
-  pg.FAILSAFE = True
   over_time = None  # time in the game
 
-  VIEWS_LIMIT = 100  # the maximum number of screenshots
-
   def __init__(self):
-    self.view = None
     self.center_hero()
     self.views = [np.array(pg.screenshot())]
-    self.UI = DotaUI(self.views[0])
+    tmp = pg.PAUSE
+    pg.PAUSE = 0.1
+    self.views.append(pg.screenshot())
+    pg.PAUSE = tmp
+    self.UI = DotaUI(self.views[-1])
     self.score = self.UI.get_score()
     self.reward = 0
     self.over_time = self.UI.check_time()
-    self.RECENT_MEMORY = 1 # things happened recently
 
   ## update once the bot makes an action
   def update(self):
-    self.center_hero()
     ## screenshot corresponds to the action by the bot
-    self.view = np.array(pg.screenshot())
-    self.UI.update(self.view)
     self.update_views(self.views)
+    self.UI.update(self.views[-1])
     score = self.score
     self.score = self.UI.get_score()
     ## 10 is a magic number
@@ -39,15 +37,14 @@ class DotaEnv:
       self.reward = 0
     else:
       self.reward = self.score - score
-    self.over_time = self.UI.check_time()
 
-  def update_views(self, view):
-    if len(self.views) >= self.VIEWS_LIMIT:
-      ## randomly remove an old view, but not the very recent ones
-      ## RECENT_ONES = 0 means every view is considered old
-      i = np.random.randint(len(self.views) - self.RECENT_MEMORY)
-      self.views.pop(i)
-    self.views.append(view)
+  def update_views(self):
+    self.center_hero()
+    self.views = [np.array(pg.screenshot())]
+    tmp = pg.PAUSE
+    pg.PAUSE = 0.1
+    self.views.append(pg.screenshot())
+    pg.PAUSE = tmp
 
 
 class DotaBot:
