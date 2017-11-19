@@ -41,7 +41,7 @@ class DotaGame:
           ## randomly throw away old record
           i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
           self.memory.pop(i)
-          self.memory.append((self.env.state, self.env.commands, reward))
+          self.memory.append((self.bot.state, self.bot.commands, reward))
       self.relaunch()
     except KeyboardInterrupt:
       print("Done one training\n")
