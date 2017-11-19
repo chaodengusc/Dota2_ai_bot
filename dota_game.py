@@ -1,14 +1,12 @@
 import time
 import pyautogui as pg
+import tensorflow as tf
 from dota_model import DotaBot
 
 class DotaGame:
-  MEMORY_LIMIT = 1000  # the maximum length of the track (state, action, reward)
 
   def __init__(self):
     self.bot = DotaBot()
-    self.memory = []
-    self.RECENT_MEMORY = 1
 
   def relaunch(self):
     tmp = pg.PAUSE
@@ -34,17 +32,15 @@ class DotaGame:
   def train(self):
     try:
       sess = tf.Session()
+      sess.run(tf.global_variables_initializer())
+      self.bot.policy.loss()
+      self.bot.policy.optimizer()
       while not self.bot.env.over_time:
         self.bot.onestep(sess)
         self.bot.env.update()
         reward = self.bot.env.reward
-        if len(self.memory) >= self.MEMORY_LIMIT:
-          ## randomly throw away old record
-          i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
-          self.memory.pop(i)
-          self.memory.append((self.bot.state, self.bot.command, reward))
         if reward != 0:
-          sess(self.train_op)
+          sess(self.bot.policy.train_op)
       self.relaunch()
     except KeyboardInterrupt:
       print("Done one training\n")

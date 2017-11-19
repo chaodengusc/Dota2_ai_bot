@@ -5,6 +5,8 @@ import tensorflow as tf
 pg.PAUSE = 0
 pg.FAILSAFE = True
 
+_width, _height = pg.size()
+
 ## put hero in the center of the camera
 def center_hero():
   tmp = pg.PAUSE
@@ -35,7 +37,7 @@ class DotaEnv:
     self.views = [np.array(pg.screenshot())]
     tmp = pg.PAUSE
     pg.PAUSE = 0.1
-    self.views.append(pg.screenshot())
+    self.views.append(np.array(pg.screenshot()))
     pg.PAUSE = tmp
     self.UI = DotaUI(self.views[-1])
     self.score = self.UI.get_score()
@@ -45,7 +47,7 @@ class DotaEnv:
   ## update once the bot makes an action
   def update(self):
     ## screenshot corresponds to the action by the bot
-    self.update_views(self.views)
+    self.update_views()
     self.UI.update(self.views[-1])
     score = self.score
     self.score = self.UI.get_score()
@@ -60,16 +62,19 @@ class DotaEnv:
     self.views = [np.array(pg.screenshot())]
     tmp = pg.PAUSE
     pg.PAUSE = 0.1
-    self.views.append(pg.screenshot())
+    self.views.append(np.array(pg.screenshot()))
     pg.PAUSE = tmp
 
 
 class DotaBot:
+  MEMORY_LIMIT = 1000
+  MEMORY_RETRIEVAL = 100
   def __init__(self):
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
     self.state = None
     self.commands = None
+    self.memory = []
 
   ## generate commands for the bot based on the current state
   def policy_complex(self):
@@ -84,16 +89,28 @@ class DotaBot:
 
   ## interpret the commands and execute them
   def onestep(self, sess):
-    UI = self.get_UI()
     center_hero()
 
     ## generate the commands based on the current state
     policy = self.policy
+    state = tf.placeholder(tf.float32, [None, _width, _height, 1])
     self.state = policy.get_state()
-    fetches = [policy.model]
-    feed_dict = {state: self.state}
-    self.command = sess.run(fetches, feed_dict=feed_dict)
+    X = self.state.reshape([1, _width, _height, 1])
+    
+    fetches = [policy.model(state)]
+    feed_dict = {state: X}
+    para = sess.run(fetches, feed_dict=feed_dict)
+#    para = tf.reshape(para, [-1])
+#    print(para[0])
+#    self.command = policy.get_command(para[0], para[1], para[2])
+    self.command = [500, 500, 'right']
     policy.execute(self.command)
+    if len(self.memory) >= self.MEMORY_LIMIT:
+    ## randomly throw away old record
+      i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
+      self.memory.pop(i)
+    self.memory.append((self.bot.state, self.bot.command))
+      
 
   def get_parameters(self):
     ## TODO
@@ -112,28 +129,26 @@ class DotaBot:
 
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
-  MEMORY_LIMIT = 1000
-  MEMORY_RETRIEVAL = 100
   def __init__(self, bot):
-    self.memory = []
     self.bot = bot
     self.kernel_size = 50
-    self.filter_shape = [kernel_size, kernel_size, 1, 1]
+    self.filter_shape = [self.kernel_size, self.kernel_size, 1, 1]
     self.w_conv = tf.get_variable('w_conv', self.filter_shape, tf.float32, \
                                   tf.random_normal_initializer(0.0, 0.02))
-    self.w_fc = tf.get_variable('w_fc', [_width * _height, 3], tf.float32, \
+    self.w_fc = tf.get_variable('w_fc', [_width *_height, 3], tf.float32, \
                                 tf.random_normal_initializer(0.0, 0.02))
     self.state = self.get_state()
     self.learning_rate = 1e-5
+    self.train_op = None
 
-  def model(self):
-    state = tf.placeholder(tf.float32, [None, _width, _height])
+  def model(self, state):
     conv1 = tf.nn.conv2d(state, self.w_conv, strides=[1,1,1,1], \
                          padding='SAME', name='conv1')
     relu1 = tf.nn.relu(conv1)
-    fc1 = tf.matmul(relu1, w_fc, a_is_sparse=True, name="fc1")
-    coef = tf.constant([_width, _height, 50])
-    output = tf.multiply(tf.tf.nn.sigmoid(x=fc1), coef)
+    relu1_flatten = tf.reshape(relu1, [-1, _width*_height])
+    fc1 = tf.matmul(relu1_flatten, self.w_fc, a_is_sparse=True, name="fc1")
+    coef = tf.constant([_width, _height, 50], dtype=tf.float32)
+    output = tf.multiply(tf.nn.sigmoid(x=fc1), coef)
     return output
 
   def loss(self):
@@ -155,14 +170,15 @@ class BotPolicy:
     
   def get_state(self):
     views = self.bot.env.views
-    UI = self.get_UI()
     ## use the difference
     X = (views[1] - views[0])
     X = np.mean(X[:, :, 0:3], axis=2)
-    width_per_block, height_per_block = _width / 10, _height / 10
+    width_per_block, height_per_block = _width // 10, _height // 10
 
-    for i in range(0, _width, width_per_block):
-      for j in range(0, _height, height_per_block):
+    for i in np.arange(0, _width, width_per_block):
+      for j in np.arange(0, _height, height_per_block):
+        i = int(i)
+        j = int(j)
         block = X[i:i+width_per_block, j:j+height_per_block]
         ## set entire block to 0 if high percentage of pixels are 0
         if np.sum(block == 0) / (width_per_block * height_per_block) > self.BLACKPIXEL_PERCENT:
@@ -295,7 +311,7 @@ class DotaUI:
     region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
     z = np.sum(region, axis=2)
     ## game has played for 10 mins
-    if np.sum(z > 720) == 12:
+    if np.sum(z > 7200) == 12:
       return 1
     else:
       return 0
