@@ -90,7 +90,7 @@ class DotaBot:
     print(command)
     if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
-      i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
+      i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
     self.memory.append((X.copy(), command.copy()))
     print(len(self.memory))
@@ -322,7 +322,7 @@ class DotaUI:
     region = self.view[i[1]:i[1]+i[3], i[0]:i[0]+i[2], 0:3]
     z = np.sum(region, axis=2)
     ## game has played for 10 mins
-    if np.sum(z > 7200) == 12:
+    if np.sum(z > 720) == 12:
       return 1
     else:
       return 0
