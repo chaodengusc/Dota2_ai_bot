@@ -10,6 +10,7 @@ import pickle
 class DotaGame:
   
   load_parameter = True
+  is_train = True
   def __init__(self):
     self.bot = DotaBot()
     self.count = 1
@@ -40,10 +41,10 @@ class DotaGame:
   def train(self):
     iter_count = 0
     try:
+      ## load the parameters if exist
       if self.load_parameter == True and os.path.isfile("train_parameters.npy"):
         para = np.load("train_parameters.npy").item()
         self.bot.set_parameters(para)
-      policy = self.bot.policy
       while not self.bot.env.over_time:
         meta = self.bot.onestep()
         self.bot.env.update()
@@ -53,6 +54,7 @@ class DotaGame:
         iter_count += 1
         if iter_count % 1000 == 0:
           self.reward.append(reward)
+
       self.golds.append(self.bot.env.gold)
       self.count += 1
       if self.count % 5 == 0:
@@ -69,14 +71,26 @@ class DotaGame:
  
   def play(self):
     try:
+      if self.load_parameter == True and os.path.isfile("train_parameters.npy"):
+        para = np.load("train_parameters.npy").item()
+        self.bot.set_parameters(para)
       while True:
         self.bot.onestep()
         self.bot.env.update()
+        if self.is_end():
+          print("Game End")
+          return 0
     except KeyboardInterrupt:
-      print("Done one game \n")
+      print("Done with the game \n")
 
+  def is_end(self):
+    pass
 
 if __name__ == "__main__":
   time.sleep(3)
   game = DotaGame()
-  game.train()
+  DotaGame.load_parameter = True
+  if DotaGame.is_train == True:
+    game.train()
+  else:
+    game.play()
