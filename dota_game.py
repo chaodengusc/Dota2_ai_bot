@@ -35,6 +35,7 @@ class DotaGame:
         meta = self.bot.onestep()
         self.bot.env.update()
         reward = self.bot.env.reward
+        print(reward)
         if reward != 0:
           self.bot.policy.optimizer(meta)
       self.relaunch()

@@ -9,20 +9,22 @@ pg.FAILSAFE = True
 _width, _height = pg.size()
 
 ## put hero in the center of the camera
+#def center_hero():
+#  tmp = pg.PAUSE
+#  pg.PAUSE = 0
+#  for i in range(570, 820, 60):
+#    pg.click(x=i, y=20, button='left')
+#  for i in range(1095, 1345, 60):
+#    pg.click(x=i, y=20, button='left')
+#  pg.click(x=880, y=20, button='right')
+#  ## left click the picture of the hero in the UI to put the hero
+#  ## in the center of the camera
+#  HERO_PICTURE = (634, 1002)
+#  pg.PAUSE = 0.05
+#  pg.click(x=HERO_PICTURE[0], y=HERO_PICTURE[1], button='left')
+#  pg.PAUSE = tmp
 def center_hero():
-  tmp = pg.PAUSE
-  pg.PAUSE = 0
-  for i in range(570, 820, 60):
-    pg.click(x=i, y=20, button='left')
-  for i in range(1095, 1345, 60):
-    pg.click(x=i, y=20, button='left')
-  pg.click(x=880, y=20, button='right')
-  ## left click the picture of the hero in the UI to put the hero
-  ## in the center of the camera
-  HERO_PICTURE = (634, 1002)
-  pg.PAUSE = 0.1
-  pg.click(x=HERO_PICTURE[0], y=HERO_PICTURE[1], button='left')
-  pg.PAUSE = tmp
+  pg.doubleClick(573, 22)
 
 
 ## Dota 2 environment
@@ -37,7 +39,7 @@ class DotaEnv:
     center_hero()
     self.views = [np.array(pg.screenshot())]
     tmp = pg.PAUSE
-    pg.PAUSE = 0.1
+    pg.PAUSE = 0.05
     self.views.append(np.array(pg.screenshot()))
     pg.PAUSE = tmp
     self.UI = DotaUI(self.views[-1])
@@ -53,7 +55,7 @@ class DotaEnv:
     score = self.score
     self.score = self.UI.get_score()
     ## 10 is a magic number
-    if self.score - score < 10 :  # marginal change does not count
+    if self.score - score < 30 :  # marginal change does not count
       self.reward = 0
     else:
       self.reward = self.score - score
@@ -68,27 +70,30 @@ class DotaEnv:
 
 
 class DotaBot:
-  MEMORY_LIMIT = 1000
-  MEMORY_RETRIEVAL = 100
+  MEMORY_LIMIT = 5
+  MEMORY_RETRIEVAL = 2
   def __init__(self):
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
     self.memory = []
 
   ## interpret the commands and execute them
-  def onestep(self, sess):
+  def onestep(self):
     center_hero()
 
     ## generate the commands based on the current state
+    views = self.env.views
     policy = self.policy
-    X = policy.get_state()
-    *command, meta = policy.forward()
+    X = policy.get_state(views[-1], views[-2])
+    *command, meta = policy.forward(X)
     policy.execute(command)
+    print(command)
     if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
       self.memory.pop(i)
     self.memory.append((X.copy(), command.copy()))
+    print(len(self.memory))
     return meta
 
   def get_parameters(self):
@@ -106,9 +111,9 @@ class BotPolicy:
     self.bot = bot
     self.paras = {'w_conv1': None, 'w_fc1': None}
     self.kernel_size = 50
-    self.paras['w_conv1'] = numpy.random.normal(loc=0, scale=0.05, size=[50, 50])
-    self.paras['w_fc1'] = numpy.random.normal(loc=0, scale=0.05, \
-                                              size=[_width, _height, 3])
+    self.paras['w_conv1'] = np.random.normal(loc=0, scale=0.05, size=[50, 50])
+    self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.05, \
+                                              size=[_width * _height, 3])
     self.learning_rate = 1e-5
     self.sigma = 50 # magic number
 
@@ -121,8 +126,9 @@ class BotPolicy:
     conv1[conv1 < 0] = 0
     ## fully connected layer
     w_fc1 = self.paras['w_fc1']
-    X_conv1 = csr_matrix(conv1)
-    fc1 = X_conv1.dot(w_fc1)
+#    X_conv1 = csr_matrix(conv1)
+    conv1_flatten = conv1.flatten(order='F')
+    fc1 = conv1_flatten.dot(w_fc1)
     x, y, z = fc1
     x = np.random.normal(x, scale=self.sigma)
     y = np.random.normal(y, scale=self.sigma)
@@ -131,37 +137,38 @@ class BotPolicy:
     y = np.abs(y) % _height
     z = np.abs(z) % (_width + _height)
     ## store results for backpropogation
-    mata = [x, y, z, X_conv1]
+    meta = [x, y, z, conv1_flatten]
     return x, y, z, meta
 
   ## return the gradient of parameters
   def optimizer(self, meta):
     reward = self.bot.env.reward
-    x, y, z, X_conv1 = meta
+    x, y, z, conv1_flatten = meta
 #    dw_fc1 = np.stack([2*x*X_conv1, 2*y*X_conv1, 2*z*X_conv1], axis=2) * reward
 #    self.bot.paras['w_fc1'] -= dw_fc1 * self.bot.learning_rate
-    dw_conv1 = numpy.random.normal(loc=0, scale=0.05, size=[50, 50])
+    dw_conv1 = np.random.normal(loc=0, scale=0.05, size=[50, 50])
     loss_before = self.loss()
-    self.bot.paras['w_conv1'] -= dw_conv1 * self.bot.learning_rate * reward
+    self.paras['w_conv1'] -= dw_conv1 * self.learning_rate * reward
     loss_after = self.loss()
     if loss_after > loss_before:
-      self.bot.paras['w_conv1'] += 2*dw_conv1 * self.bot.learning_rate * reward
+      self.paras['w_conv1'] += 2*dw_conv1 * self.learning_rate * reward
 
-    dw_fc1 = numpy.random.normal(loc=0, scale=0.05, size=[_width, _height, 3])
+    dw_fc1 = np.random.normal(loc=0, scale=0.05, size=[_width * _height, 3])
     loss_before = self.loss()
-    self.bot.paras['w_fc1'] -= dw_fc1 * self.bot.learning_rate * reward
+    self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward
     loss_after = self.loss()
     if loss_after > loss_before:
-      self.bot.paras['w_fc1'] += 2*dw_fc1 * self.bot.learning_rate * reward
+      self.paras['w_fc1'] += 2*dw_fc1 * self.learning_rate * reward
   
   def loss(self):
-    l = np.min(len(self.memory), self.MEMORY_RETRIEVAL)
+    l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
+#    l = len(self.bot.memory)
     reward = self.bot.env.reward
     loss = 0
     for i in range(-1, -(l+1), -1):
-      X = self.memory[i][0]
+      X = self.bot.memory[i][0]
       predict_x, predict_y, predict_z, meta = self.forward(X)
-      observe_x, observe_y, observe_z = self.memory[i][1]
+      observe_x, observe_y, observe_z = self.bot.memory[i][1]
       x = (predict_x - observe_x) % _width
       y = (predict_y - observe_y) % _height
       if predict_z * observe_z < 0:
@@ -192,9 +199,12 @@ class BotPolicy:
   def execute(self, command):
     ## TODO: tune the parameter
     tmp = pg.PAUSE
-    pg.PAUSE = 0.7
-    button=['right' if command[2] > 0 else 'left']
-    pg.click(x=command[0], y=command[1], button=botton)
+    pg.PAUSE = 1
+    if command[2] > 0:
+      button = 'right'
+    else:
+      button = 'left'
+    pg.click(x=command[0], y=command[1], button=button)
     pg.PAUSE = tmp
 
 class DotaUI:
