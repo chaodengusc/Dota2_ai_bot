@@ -59,7 +59,7 @@ class DotaGame:
       self.count += 1
       if self.count % 5 == 0:
         tmp = strftime("%d-%b-%Y", gmtime())
-        with open('result_'+tmp+'-'+self.count, 'wb') as output:
+        with open('result_'+tmp+'-'+str(self.count), 'wb') as output:
           pickle.dump(self.bot.env.gold, output)
           pickle.dump(self.bot.env.reward, output)
         paras = self.bot.get_parameters()
