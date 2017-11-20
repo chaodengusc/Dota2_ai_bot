@@ -133,6 +133,7 @@ class BotPolicy:
     self.paras['w_conv1'] = np.random.normal(loc=0, scale=0.07, size=[self.kernel_size, self.kernel_size])
     self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.07, \
                             size=[_width // self.scale * _height // self.scale, 3])
+    ## TODO: tune the parameters
     self.learning_rate = 1e-5
     self.sigma = 50 # magic number
 
@@ -151,10 +152,10 @@ class BotPolicy:
     x, y, z = fc1
     x = np.random.normal(x, scale=self.sigma)
     y = np.random.normal(y, scale=self.sigma)
+    z = np.random.normal(z, scale=self.sigma)
     ## normalize to fit the screen size
     x = np.abs(x) % _width
     y = np.abs(y) % _height
-    z = np.abs(z) % (_width + _height)
     ## store results for backpropogation
     meta = [x, y, z, conv1_flatten]
     return x, y, z, meta
@@ -193,7 +194,7 @@ class BotPolicy:
         z = predict_z - observe_z
       else:
         z = 0
-      z = np.abs(z) % (_width + _height)
+      z = z % (_width + _height)
       loss += x**2 + y**2 + z**2
     loss /= l
     return reward * loss
