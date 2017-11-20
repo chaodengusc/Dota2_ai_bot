@@ -40,8 +40,8 @@ class DotaGame:
   def train(self):
     iter_count = 0
     try:
-      if self.load_parameter == True and os.path.isfile("train_parameters.npz"):
-        para = np.load("train_parameters.npz").item()
+      if self.load_parameter == True and os.path.isfile("train_parameters.npy"):
+        para = np.load("train_parameters.npy").item()
         self.bot.set_parameters(para)
       policy = self.bot.policy
       while not self.bot.env.over_time:
@@ -56,12 +56,12 @@ class DotaGame:
       self.golds.append(self.bot.env.gold)
       self.count += 1
       if self.count % 1 == 0:
-        tmp = strftime("%d-%b-%Y-%H:%M:%S", gmtime())
-        with open('result'+tmp+'txt', 'wb') as output:
-          pickle.dump(self.gold, output)
-          pickle.dump(self.reward, output)
+        tmp = strftime("%d-%b-%Y", gmtime())
+        with open('result_'+tmp, 'wb') as output:
+          pickle.dump(self.bot.env.gold, output)
+          pickle.dump(self.bot.env.reward, output)
         paras = self.bot.get_parameters()
-        np.save('train_parameters.npz', paras)
+        np.save('train_parameters', paras)
         
       self.relaunch()
     except KeyboardInterrupt:
