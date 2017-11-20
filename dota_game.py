@@ -1,6 +1,5 @@
 import time
 import pyautogui as pg
-import tensorflow as tf
 from dota_model import DotaBot
 
 class DotaGame:
@@ -31,16 +30,13 @@ class DotaGame:
 
   def train(self):
     try:
-      sess = tf.Session()
-      sess.run(tf.global_variables_initializer())
-      self.bot.policy.loss()
-      self.bot.policy.optimizer()
+      policy = self.bot.policy
       while not self.bot.env.over_time:
-        self.bot.onestep(sess)
+        meta = self.bot.onestep()
         self.bot.env.update()
         reward = self.bot.env.reward
         if reward != 0:
-          sess(self.bot.policy.train_op)
+          self.bot.policy.optimizer(meta)
       self.relaunch()
     except KeyboardInterrupt:
       print("Done one training\n")

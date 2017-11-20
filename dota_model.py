@@ -1,6 +1,7 @@
 import numpy as np
 import pyautogui as pg
-import tensorflow as tf
+from scipy.sparse import csr_matrix
+from scipy.signal import convolve2d
 
 pg.PAUSE = 0
 pg.FAILSAFE = True
@@ -72,20 +73,7 @@ class DotaBot:
   def __init__(self):
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
-    self.state = None
-    self.commands = None
     self.memory = []
-
-  ## generate commands for the bot based on the current state
-  def policy_complex(self):
-    ## TODO
-    UI = self.get_UI()
-    ## magic number 3 indicates a large operation space
-    x = np.random.randint(UI.width, size=3)
-    y = np.random.randint(UI.height, size=3)
-    buttons = ['left' if i==0 else 'right' \
-      for i in np.random.randint(2, size=3)]
-    return [(x[i], y[i], buttons[i]) for i in range(3)]
 
   ## interpret the commands and execute them
   def onestep(self, sess):
@@ -93,107 +81,120 @@ class DotaBot:
 
     ## generate the commands based on the current state
     policy = self.policy
-    state = tf.placeholder(tf.float32, [None, _width, _height, 1])
-    self.state = policy.get_state()
-    X = self.state.reshape([1, _width, _height, 1])
-    
-    fetches = [policy.model(state)]
-    feed_dict = {state: X}
-    para = sess.run(fetches, feed_dict=feed_dict)
-#    para = tf.reshape(para, [-1])
-#    print(para[0])
-#    self.command = policy.get_command(para[0], para[1], para[2])
-    self.command = [500, 500, 'right']
-    policy.execute(self.command)
+    X = policy.get_state()
+    *command, meta = policy.forward()
+    policy.execute(command)
     if len(self.memory) >= self.MEMORY_LIMIT:
-    ## randomly throw away old record
+      ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.RECENT_MEMORY)
       self.memory.pop(i)
-    self.memory.append((self.bot.state, self.bot.command))
-      
+    self.memory.append((X.copy(), command.copy()))
+    return meta
 
   def get_parameters(self):
-    ## TODO
-    return self.parameters
+    return self.policy.paras
 
   def set_parameters(self, parameters):
-    ## TODO
-    pass
-
-  def get_state(self):
-    return self.env.views[-1]
-
-  def get_UI(self):
-    return self.env.UI
+    paras = self.get_parameters
+    for k, v in parameters:
+      paras[k] = v
 
 
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   def __init__(self, bot):
     self.bot = bot
+    self.paras = {'w_conv1': None, 'w_fc1': None}
     self.kernel_size = 50
-    self.filter_shape = [self.kernel_size, self.kernel_size, 1, 1]
-    self.w_conv = tf.get_variable('w_conv', self.filter_shape, tf.float32, \
-                                  tf.random_normal_initializer(0.0, 0.02))
-    self.w_fc = tf.get_variable('w_fc', [_width *_height, 3], tf.float32, \
-                                tf.random_normal_initializer(0.0, 0.02))
-    self.state = self.get_state()
+    self.paras['w_conv1'] = numpy.random.normal(loc=0, scale=0.05, size=[50, 50])
+    self.paras['w_fc1'] = numpy.random.normal(loc=0, scale=0.05, \
+                                              size=[_width, _height, 3])
     self.learning_rate = 1e-5
-    self.train_op = None
+    self.sigma = 50 # magic number
 
-  def model(self, state):
-    conv1 = tf.nn.conv2d(state, self.w_conv, strides=[1,1,1,1], \
-                         padding='SAME', name='conv1')
-    relu1 = tf.nn.relu(conv1)
-    relu1_flatten = tf.reshape(relu1, [-1, _width*_height])
-    fc1 = tf.matmul(relu1_flatten, self.w_fc, a_is_sparse=True, name="fc1")
-    coef = tf.constant([_width, _height, 50], dtype=tf.float32)
-    output = tf.multiply(tf.nn.sigmoid(x=fc1), coef)
-    return output
+  ## return the location of the click for a given state
+  def forward(self, X):
+    ## convolution
+    w_conv1 = self.paras['w_conv1']
+    conv1 = convolve2d(X, w_conv1, boundary='symm', mode='same')
+    ## relu
+    conv1[conv1 < 0] = 0
+    ## fully connected layer
+    w_fc1 = self.paras['w_fc1']
+    X_conv1 = csr_matrix(conv1)
+    fc1 = X_conv1.dot(w_fc1)
+    x, y, z = fc1
+    x = np.random.normal(x, scale=self.sigma)
+    y = np.random.normal(y, scale=self.sigma)
+    ## normalize to fit the screen size
+    x = np.abs(x) % _width
+    y = np.abs(y) % _height
+    z = np.abs(z) % (_width + _height)
+    ## store results for backpropogation
+    mata = [x, y, z, X_conv1]
+    return x, y, z, meta
 
+  ## return the gradient of parameters
+  def optimizer(self, meta):
+    reward = self.bot.env.reward
+    x, y, z, X_conv1 = meta
+#    dw_fc1 = np.stack([2*x*X_conv1, 2*y*X_conv1, 2*z*X_conv1], axis=2) * reward
+#    self.bot.paras['w_fc1'] -= dw_fc1 * self.bot.learning_rate
+    dw_conv1 = numpy.random.normal(loc=0, scale=0.05, size=[50, 50])
+    loss_before = self.loss()
+    self.bot.paras['w_conv1'] -= dw_conv1 * self.bot.learning_rate * reward
+    loss_after = self.loss()
+    if loss_after > loss_before:
+      self.bot.paras['w_conv1'] += 2*dw_conv1 * self.bot.learning_rate * reward
+
+    dw_fc1 = numpy.random.normal(loc=0, scale=0.05, size=[_width, _height, 3])
+    loss_before = self.loss()
+    self.bot.paras['w_fc1'] -= dw_fc1 * self.bot.learning_rate * reward
+    loss_after = self.loss()
+    if loss_after > loss_before:
+      self.bot.paras['w_fc1'] += 2*dw_fc1 * self.bot.learning_rate * reward
+  
   def loss(self):
-    self.loss_op = None
     l = np.min(len(self.memory), self.MEMORY_RETRIEVAL)
-    index = [i-1 for i in range(-l)]
-    states = np.stack([self.memory[i][0] for i in index], axis=0)
-    commands = np.stack([self.memory[i][1] for i in index], axis=0) 
-    states_tf = tf.convert_to_tensor(states)
-    commands_tf = tf.convert_to_tensor(commands)
-    reward_tf = tf.convert_to_tensor(self.bot.env.reward)
-    self.loss_op = reward_tf * \
-      tf.losses.mean_squared_error(self.model(states_tf)[0:2], commands_tf)
+    reward = self.bot.env.reward
+    loss = 0
+    for i in range(-1, -(l+1), -1):
+      X = self.memory[i][0]
+      predict_x, predict_y, predict_z, meta = self.forward(X)
+      observe_x, observe_y, observe_z = self.memory[i][1]
+      x = (predict_x - observe_x) % _width
+      y = (predict_y - observe_y) % _height
+      if predict_z * observe_z < 0:
+        z = predict_z - observe_z
+      else:
+        z = 0
+      z = np.abs(z) % (_width + _height)
+      loss += x**2 + y**2 + z**2
+    loss /= l
+    return reward * loss
 
-  def optimizer(self):
-    global_step = tf.Variable(0, trainable=False, name="counter")
-    self.train_op = tf.train.AdamOptimizer(self.learning_rate).minimize(
-                      self.loss_op, global_step=global_step)
-    
-  def get_state(self):
-    views = self.bot.env.views
+   
+  def get_state(self, view1, view2):
     ## use the difference
-    X = (views[1] - views[0])
+    X = view1 - view2
     X = np.mean(X[:, :, 0:3], axis=2)
     width_per_block, height_per_block = _width // 10, _height // 10
 
     for i in np.arange(0, _width, width_per_block):
       for j in np.arange(0, _height, height_per_block):
-        i = int(i)
-        j = int(j)
+        i = int(i); j = int(j)
         block = X[i:i+width_per_block, j:j+height_per_block]
         ## set entire block to 0 if high percentage of pixels are 0
         if np.sum(block == 0) / (width_per_block * height_per_block) > self.BLACKPIXEL_PERCENT:
           X[i:i+width_per_block, j:j+height_per_block] = 0
     return X
 
-  def get_command(self, mu1, mu2, sigma):
-    x, y = np.random.multivariate_normal([mu1, mu2], np.diag([sigma, sigma]))
-    return (x, y, 'right')
-
   def execute(self, command):
     ## TODO: tune the parameter
     tmp = pg.PAUSE
     pg.PAUSE = 0.7
-    pg.click(x=command[0], y=command[1], button=command[2])
+    button=['right' if command[2] > 0 else 'left']
+    pg.click(x=command[0], y=command[1], button=botton)
     pg.PAUSE = tmp
 
 class DotaUI:
