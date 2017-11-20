@@ -43,22 +43,20 @@ class DotaEnv:
     self.views.append(np.array(pg.screenshot()))
     pg.PAUSE = tmp
     self.UI = DotaUI(self.views[-1])
-    self.score = self.UI.get_score()
     self.reward = 0
     self.over_time = self.UI.check_time()
+    self.hp = self.UI.get_hp()
+    self.gold = self.UI.get_gold()
+    self.lvl = self.UI.get_lvl()
+    self.ability = self.UI.unlock_ability()
 
   ## update once the bot makes an action
   def update(self):
     ## screenshot corresponds to the action by the bot
     self.update_views()
     self.UI.update(self.views[-1])
-    score = self.score
-    self.score = self.UI.get_score()
-    ## 10 is a magic number
-    if self.score - score < 30 :  # marginal change does not count
-      self.reward = 0
-    else:
-      self.reward = self.score - score
+    self.update_reward()
+    self.over_time = self.UI.check_time()
 
   def update_views(self):
     center_hero()
@@ -68,10 +66,27 @@ class DotaEnv:
     self.views.append(np.array(pg.screenshot()))
     pg.PAUSE = tmp
 
+  def update_reward(self):
+    UI = self.UI
+    hp = UI.get_hp()
+    lvl = UI.get_lvl()
+    gold = UI.get_gold()
+    ability = UI.unlock_ability()
+    delta_hp = hp - self.hp
+    delta_lvl = lvl - self.lvl
+    delta_gold = gold - self.gold
+    delta_ability = ability - self.ability
+    if delta_gold < 20:
+      delta_gold = 0
+    self.reward = delta_gold + delta_hp + 100 * delta_lvl + 50 * delta_ability
+    self.hp = hp
+    self.lvl = lvl
+    self.gold = gold
+    self.ability = ability
 
 class DotaBot:
-  MEMORY_LIMIT = 5
-  MEMORY_RETRIEVAL = 2
+  MEMORY_LIMIT = 20
+  MEMORY_RETRIEVAL = 10
   def __init__(self):
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
@@ -84,16 +99,16 @@ class DotaBot:
     ## generate the commands based on the current state
     views = self.env.views
     policy = self.policy
-    X = policy.get_state(views[-1], views[-2])
+    X = policy.get_state(views[-1], views[-2], self.policy.scale)
     *command, meta = policy.forward(X)
     policy.execute(command)
-    print(command)
     if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
     self.memory.append((X.copy(), command.copy()))
     print(len(self.memory))
+    print(command)
     return meta
 
   def get_parameters(self):
@@ -104,16 +119,20 @@ class DotaBot:
     for k, v in parameters:
       paras[k] = v
 
+  def get_UI(self):
+    return self.env.UI
+
 
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   def __init__(self, bot):
     self.bot = bot
     self.paras = {'w_conv1': None, 'w_fc1': None}
-    self.kernel_size = 50
-    self.paras['w_conv1'] = np.random.normal(loc=0, scale=0.05, size=[50, 50])
-    self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.05, \
-                                              size=[_width * _height, 3])
+    self.scale = 10 # scaling the screenshot to reduce the dimension
+    self.kernel_size = 50 // self.scale
+    self.paras['w_conv1'] = np.random.normal(loc=0, scale=0.07, size=[self.kernel_size, self.kernel_size])
+    self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.07, \
+                            size=[_width // self.scale * _height // self.scale, 3])
     self.learning_rate = 1e-5
     self.sigma = 50 # magic number
 
@@ -146,14 +165,14 @@ class BotPolicy:
     x, y, z, conv1_flatten = meta
 #    dw_fc1 = np.stack([2*x*X_conv1, 2*y*X_conv1, 2*z*X_conv1], axis=2) * reward
 #    self.bot.paras['w_fc1'] -= dw_fc1 * self.bot.learning_rate
-    dw_conv1 = np.random.normal(loc=0, scale=0.05, size=[50, 50])
+    dw_conv1 = np.random.normal(loc=0, scale=0.05, size=self.paras['w_conv1'].shape)
     loss_before = self.loss()
     self.paras['w_conv1'] -= dw_conv1 * self.learning_rate * reward
     loss_after = self.loss()
     if loss_after > loss_before:
       self.paras['w_conv1'] += 2*dw_conv1 * self.learning_rate * reward
 
-    dw_fc1 = np.random.normal(loc=0, scale=0.05, size=[_width * _height, 3])
+    dw_fc1 = np.random.normal(loc=0, scale=0.05, size=self.paras['w_fc1'].shape)
     loss_before = self.loss()
     self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward
     loss_after = self.loss()
@@ -162,7 +181,6 @@ class BotPolicy:
   
   def loss(self):
     l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
-#    l = len(self.bot.memory)
     reward = self.bot.env.reward
     loss = 0
     for i in range(-1, -(l+1), -1):
@@ -180,8 +198,7 @@ class BotPolicy:
     loss /= l
     return reward * loss
 
-   
-  def get_state(self, view1, view2):
+  def get_state(self, view1, view2, scale):
     ## use the difference
     X = view1 - view2
     X = np.mean(X[:, :, 0:3], axis=2)
@@ -194,12 +211,18 @@ class BotPolicy:
         ## set entire block to 0 if high percentage of pixels are 0
         if np.sum(block == 0) / (width_per_block * height_per_block) > self.BLACKPIXEL_PERCENT:
           X[i:i+width_per_block, j:j+height_per_block] = 0
-    return X
+    ## reduce the dimension of the input by a factor of scale**2
+    X_reduce = np.zeros([_height // scale, _width // scale])
+    for i in np.arange(0, _height, scale):
+      for j in np.arange(0, _width, scale):
+        i = int(i); j = int(j)
+        X_reduce[i // scale, j // scale] = np.sum(X[i:i+scale, j:j+scale])
+    return X_reduce
 
   def execute(self, command):
     ## TODO: tune the parameter
     tmp = pg.PAUSE
-    pg.PAUSE = 1
+    pg.PAUSE = 2
     if command[2] > 0:
       button = 'right'
     else:
@@ -211,7 +234,7 @@ class DotaUI:
   ## coordinates of key components in Dota 2
   CONTINUE = (956, 904)
   PLAY_DOTA = (1696, 1034)
-  CREATE_LOBBY = (1652, 393)
+  CREATE_LOBBY = (1635, 610)
   START_GAME = PLAY_DOTA
   MIRANA = (992, 417)
   SKIP_AHEAD = (163, 791)
@@ -326,10 +349,3 @@ class DotaUI:
       return 1
     else:
       return 0
-
-  def get_score(self):
-    gold = self.get_gold()
-    ability_lvl = self.unlock_ability()
-    lvl = self.get_lvl()
-    score = gold * (lvl + ability_lvl)
-    return score
