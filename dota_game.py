@@ -90,6 +90,8 @@ if __name__ == "__main__":
   time.sleep(3)
   game = DotaGame()
   DotaGame.load_parameter = True
+  ## default is the training mode
+  DotaGame.is_train = True
   if DotaGame.is_train == True:
     game.train()
   else:
