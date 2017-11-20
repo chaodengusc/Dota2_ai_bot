@@ -4,6 +4,7 @@ import pyautogui as pg
 import numpy as np
 from dota_model import DotaBot
 from time import gmtime, strftime
+import pickle
 
 
 class DotaGame:
@@ -54,10 +55,11 @@ class DotaGame:
           self.reward.append(reward)
       self.golds.append(self.bot.env.gold)
       self.count += 1
-      if self.count % 5 == 0:
+      if self.count % 1 == 0:
         tmp = strftime("%d-%b-%Y-%H:%M:%S", gmtime())
         with open('result'+tmp+'txt', 'wb') as output:
-          pickle.dump(self.reward, self.gold)
+          pickle.dump(self.gold, output)
+          pickle.dump(self.reward, output)
         paras = self.bot.get_parameters()
         np.save('train_parameters.npz', paras)
         
