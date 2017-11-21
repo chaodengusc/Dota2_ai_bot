@@ -115,9 +115,9 @@ class DotaBot:
     return self.policy.paras
 
   def set_parameters(self, parameters):
-    paras = self.get_parameters
-    for k, v in parameters:
-      paras[k] = v
+    paras = self.get_parameters()
+    for k in parameters:
+      paras[k] = parameters[k]
 
   def get_UI(self):
     return self.env.UI
@@ -125,6 +125,7 @@ class DotaBot:
 
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
+  LEFT_PERCENT = 0.1
   def __init__(self, bot):
     self.bot = bot
     self.paras = {'w_conv1': None, 'w_fc1': None}
@@ -223,11 +224,12 @@ class BotPolicy:
   def execute(self, command):
     ## TODO: tune the parameter
     tmp = pg.PAUSE
-    pg.PAUSE = 2
-    if command[2] > 0:
-      button = 'right'
-    else:
+    pg.PAUSE = 1.6
+    ## left click happens rare in this case
+    if command[2] < 0 and np.random.binomial(1, self.LEFT_PERCENT) == 1:
       button = 'left'
+    else:
+      button = 'right'
     pg.click(x=command[0], y=command[1], button=button)
     pg.PAUSE = tmp
 

@@ -10,7 +10,8 @@ import pickle
 class DotaGame:
   
   load_parameter = True
-  is_train = True
+  is_train = False
+  battle_field = (96, 978)
   def __init__(self):
     self.bot = DotaBot()
     self.count = 1
@@ -33,9 +34,13 @@ class DotaGame:
     x, y = UI.LOCK_IN; pg.click(x, y, button="left")
     pg.PAUSE = 10
     x, y = UI.SKIP_AHEAD; pg.click(x, y, button="left")
-    pg.PAUSE = tmp
     ## reset the time
     self.bot.env.over_time = 0
+    ## move to the battle field
+    x, y = self.battle_field; pg.click(x, y, button="right")
+    pg.PAUSE = 80
+    pg.click(button="right")
+    pg.PAUSE = tmp
     self.train()
 
   def train(self):
@@ -43,6 +48,7 @@ class DotaGame:
     try:
       ## load the parameters if exist
       if self.load_parameter == True and os.path.isfile("train_parameters.npy"):
+        self.load_parameter = False
         para = np.load("train_parameters.npy").item()
         self.bot.set_parameters(para)
       while not self.bot.env.over_time:
@@ -90,7 +96,7 @@ if __name__ == "__main__":
   time.sleep(3)
   game = DotaGame()
   DotaGame.load_parameter = True
-  ## default is the training mode
+  ## default is the play mode
   DotaGame.is_train = True
   if DotaGame.is_train == True:
     game.train()
