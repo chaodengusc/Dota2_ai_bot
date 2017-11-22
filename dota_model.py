@@ -91,25 +91,23 @@ class DotaBot:
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
     self.memory = []
+    self.mouse_x = 96
+    self.mouse_y = 978
 
   ## interpret the commands and execute them
   def onestep(self):
-    center_hero()
-
     ## generate the commands based on the current state
     views = self.env.views
     policy = self.policy
     X = policy.get_state(views[-1], views[-2], self.policy.scale)
-    *command, meta = policy.forward(X)
-    policy.execute(command)
+    p, meta = policy.forward(X)
+    direction = policy.execute(p)
     if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
-    self.memory.append((X.copy(), command.copy()))
-    print(len(self.memory))
-    print(command)
-    return meta
+    self.memory.append((command.copy(), meta.copy(), direction.copy()))
+    print(p)
 
   def get_parameters(self):
     return self.policy.paras
@@ -126,79 +124,74 @@ class DotaBot:
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   LEFT_PERCENT = 0.1
+  L = 480 # the attack range of the hero mirana
   def __init__(self, bot):
     self.bot = bot
-    self.paras = {'w_conv1': None, 'w_fc1': None}
     self.scale = 10 # scaling the screenshot to reduce the dimension
-    self.kernel_size = 50 // self.scale
-    self.paras['w_conv1'] = np.random.normal(loc=0, scale=0.07, size=[self.kernel_size, self.kernel_size])
-    self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.07, \
-                            size=[_width // self.scale * _height // self.scale, 3])
+    self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.05, \
+      size=[_width // self.scale * _height // self.scale * 2, 100])
+    ## output eight direction
+    self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, size=[100, 8])
     ## TODO: tune the parameters
     self.learning_rate = 1e-5
-    self.sigma = 50 # magic number
 
   ## return the location of the click for a given state
   def forward(self, X):
-    ## convolution
-    w_conv1 = self.paras['w_conv1']
-    conv1 = convolve2d(X, w_conv1, boundary='symm', mode='same')
-    ## relu
-    conv1[conv1 < 0] = 0
     ## fully connected layer
     w_fc1 = self.paras['w_fc1']
-#    X_conv1 = csr_matrix(conv1)
-    conv1_flatten = conv1.flatten(order='F')
-    fc1 = conv1_flatten.dot(w_fc1)
-    x, y, z = fc1
-    x = np.random.normal(x, scale=self.sigma)
-    y = np.random.normal(y, scale=self.sigma)
-    z = np.random.normal(z, scale=self.sigma)
-    ## normalize to fit the screen size
-    x = np.abs(x) % _width
-    y = np.abs(y) % _height
+    X_flatten = X.flatten(order='F')
+    fc1 = X_flatten.dot(w_fc1)
+    ## relu
+    fc1[fc1 < 0] = 0
+    ## second fully connect layer
+    w_fc2 = self.paras['w_fc2']
+    fc2 = fc1.dot(w_fc2)
+    ## stable softmax
+    fc2 -= np.max(fc2)
+    ## probability of taking each direction
+    p = np.exp(fc2)
+    p = p / np.sum(p)
     ## store results for backpropogation
-    meta = [x, y, z, conv1_flatten]
-    return x, y, z, meta
+    meta = [X, fc1]
+    return p, meta
 
   ## return the gradient of parameters
-  def optimizer(self, meta):
+  def optimizer(self, p, meta, direction):
     reward = self.bot.env.reward
-    x, y, z, conv1_flatten = meta
-#    dw_fc1 = np.stack([2*x*X_conv1, 2*y*X_conv1, 2*z*X_conv1], axis=2) * reward
-#    self.bot.paras['w_fc1'] -= dw_fc1 * self.bot.learning_rate
-    dw_conv1 = np.random.normal(loc=0, scale=0.05, size=self.paras['w_conv1'].shape)
-    loss_before = self.loss()
-    self.paras['w_conv1'] -= dw_conv1 * self.learning_rate * reward
-    loss_after = self.loss()
-    if loss_after > loss_before:
-      self.paras['w_conv1'] += 2*dw_conv1 * self.learning_rate * reward
+    X, fc1 = meta
+    X_flatten = X.flatten(order='F')
 
-    dw_fc1 = np.random.normal(loc=0, scale=0.05, size=self.paras['w_fc1'].shape)
-    loss_before = self.loss()
-    self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward
-    loss_after = self.loss()
-    if loss_after > loss_before:
-      self.paras['w_fc1'] += 2*dw_fc1 * self.learning_rate * reward
-  
+    i = direction.argmax()
+    dp = np.zeros_like(p)
+    for j in range(len(dp)):
+      if j == i:
+        dp[j] = -(1 - p[i])
+      else:
+        dp[j] = p[j]
+
+    dw_fc2 = fc1.T.multiply(dp) 
+    w_fc2 = self.paras["w_fc2"]
+    dx_fc2 = dp.multiply(w_fc2.T)
+
+    ## relu
+    dx_fc2[dx_fc2 < 0] = 0
+    ## the first layer
+    dw_fc1 = X_flatten.T.multiply(dx_fc2)
+    ## update the parameter
+    self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
+    self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
+
+  ## negative log likelihood
   def loss(self):
     l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
     reward = self.bot.env.reward
-    loss = 0
+    logp = 0
     for i in range(-1, -(l+1), -1):
-      X = self.bot.memory[i][0]
-      predict_x, predict_y, predict_z, meta = self.forward(X)
-      observe_x, observe_y, observe_z = self.bot.memory[i][1]
-      x = (predict_x - observe_x) % _width
-      y = (predict_y - observe_y) % _height
-      if predict_z * observe_z < 0:
-        z = predict_z - observe_z
-      else:
-        z = 0
-      z = z % (_width + _height)
-      loss += x**2 + y**2 + z**2
-    loss /= l
-    return reward * loss
+      p, meta, direction = self.bot.memory[i]
+      prob = p.dot(direction)
+      logp += np.log(prob)
+
+    return -logp * np.sign(reward)
 
   def get_state(self, view1, view2, scale):
     ## use the difference
@@ -219,19 +212,27 @@ class BotPolicy:
       for j in np.arange(0, _width, scale):
         i = int(i); j = int(j)
         X_reduce[i // scale, j // scale] = np.sum(X[i:i+scale, j:j+scale])
-    return X_reduce
+    return np.stack([X_reduce, view1], axis=2)
 
-  def execute(self, command):
+  def execute(self, p):
+    center_hero()
     ## TODO: tune the parameter
     tmp = pg.PAUSE
     pg.PAUSE = 1.6
     ## left click happens rare in this case
-    if command[2] < 0 and np.random.binomial(1, self.LEFT_PERCENT) == 1:
+
+    if np.random.binomial(1, self.LEFT_PERCENT) == 1:
       button = 'left'
     else:
       button = 'right'
-    pg.click(x=command[0], y=command[1], button=button)
+
+    direction = np.random.multinomial(1, p)
+    i = direction.argmax()
+    self.mouse_x += np.cos(i*np.pi / 4)
+    self.mouse_y += np.sin(i*np.pi / 4)
+    pg.click(x=self.mouse_x, y=self.mouse_y, button=button)
     pg.PAUSE = tmp
+    return direction
 
 class DotaUI:
   ## coordinates of key components in Dota 2
