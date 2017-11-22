@@ -58,16 +58,16 @@ class DotaGame:
         if reward != 0:
           self.bot.policy.optimizer(meta)
         iter_count += 1
-        if iter_count % 1000 == 0:
-          self.reward.append(reward)
+        if iter_count % 10 == 0:
+          self.rewards.append(reward)
 
       self.golds.append(self.bot.env.gold)
       self.count += 1
       if self.count % 5 == 0:
         tmp = strftime("%d-%b-%Y", gmtime())
         with open('result_'+tmp+'-'+str(self.count), 'wb') as output:
-          pickle.dump(self.bot.env.gold, output)
-          pickle.dump(self.bot.env.reward, output)
+          pickle.dump(self.golds, output)
+          pickle.dump(self.rewards, output)
         paras = self.bot.get_parameters()
         np.save('train_parameters', paras)
         
