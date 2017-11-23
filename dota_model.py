@@ -106,7 +106,7 @@ class DotaBot:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
-    self.memory.append((command.copy(), meta.copy(), direction.copy()))
+    self.memory.append((p.copy(), meta.copy(), direction.copy()))
     print(p)
 
   def get_parameters(self):
@@ -128,6 +128,7 @@ class BotPolicy:
   def __init__(self, bot):
     self.bot = bot
     self.scale = 10 # scaling the screenshot to reduce the dimension
+    self.paras = {}
     self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.05, \
       size=[_width // self.scale * _height // self.scale * 2, 100])
     ## output eight direction
@@ -139,6 +140,7 @@ class BotPolicy:
   def forward(self, X):
     ## fully connected layer
     w_fc1 = self.paras['w_fc1']
+    print(w_fc1.shape)
     X_flatten = X.flatten(order='F')
     fc1 = X_flatten.dot(w_fc1)
     ## relu
@@ -208,11 +210,13 @@ class BotPolicy:
           X[i:i+width_per_block, j:j+height_per_block] = 0
     ## reduce the dimension of the input by a factor of scale**2
     X_reduce = np.zeros([_height // scale, _width // scale])
+    view1_reduce = np.zeros([_height // scale, _width // scale])
     for i in np.arange(0, _height, scale):
       for j in np.arange(0, _width, scale):
         i = int(i); j = int(j)
         X_reduce[i // scale, j // scale] = np.sum(X[i:i+scale, j:j+scale])
-    return np.stack([X_reduce, view1], axis=2)
+        view1_reduce[i // scale, j // scale] = np.sum(view1[i:i+scale, j:j+scale])
+    return np.stack([X_reduce, view1_reduce], axis=2)
 
   def execute(self, p):
     center_hero()
@@ -228,9 +232,9 @@ class BotPolicy:
 
     direction = np.random.multinomial(1, p)
     i = direction.argmax()
-    self.mouse_x += np.cos(i*np.pi / 4)
-    self.mouse_y += np.sin(i*np.pi / 4)
-    pg.click(x=self.mouse_x, y=self.mouse_y, button=button)
+    self.bot.mouse_x += np.cos(i*np.pi / 4) * self.L
+    self.bot.mouse_y += np.sin(i*np.pi / 4) * self.L
+    pg.click(x=self.bot.mouse_x, y=self.bot.mouse_y, button=button)
     pg.PAUSE = tmp
     return direction
 

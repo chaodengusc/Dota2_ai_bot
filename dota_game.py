@@ -56,7 +56,10 @@ class DotaGame:
         self.bot.env.update()
         reward = self.bot.env.reward
         if reward != 0:
-          self.bot.policy.optimizer(meta)
+          l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
+          for i in range(-1, -(l+1), -1):
+            p, meta, direction = self.bot.memory[i]
+            self.bot.policy.optimizer(p, meta, direction)
         iter_count += 1
         if iter_count % 10 == 0:
           self.rewards.append(reward)
