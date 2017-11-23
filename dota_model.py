@@ -124,6 +124,7 @@ class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   LEFT_PERCENT = 0.1
   L = 480 # the attack range of the hero mirana
+  NUM_ACTIONS = 9
   def __init__(self, bot):
     self.bot = bot
     self.scale = 10 # scaling the screenshot to reduce the dimension
@@ -131,7 +132,8 @@ class BotPolicy:
     self.paras['w_fc1'] = np.random.normal(loc=0, scale=0.05, \
       size=[_width // self.scale * _height // self.scale * 2, 100])
     ## output eight direction
-    self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, size=[100, 8])
+    self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, \
+                                           size=[100, NUM_ACTIONS])
     ## TODO: tune the parameters
     self.learning_rate = 1e-5
 
@@ -217,6 +219,7 @@ class BotPolicy:
         i = int(i); j = int(j)
         X_reduce[i // scale, j // scale] = np.mean(X[i:i+scale, j:j+scale])
         v_reduce[i // scale, j // scale] = np.mean(v[i:i+scale, j:j+scale])
+    ## normalize
     X_reduce /= 255
     v_reduce /= 255
     return np.stack([X_reduce, v_reduce], axis=2)
@@ -228,20 +231,25 @@ class BotPolicy:
     pg.PAUSE = 1.6
     ## left click happens rare in this case
 
-    if np.random.binomial(1, self.LEFT_PERCENT) == 1:
-      button = 'left'
-    else:
-      button = 'right'
+    # if np.random.binomial(1, self.LEFT_PERCENT) == 1:
+    #   button = 'left'
+    # else:
+    #   button = 'right'
+    button = 'right'
 
     p = np.squeeze(np.asarray(p))
     direction = np.random.multinomial(1, p)
     i = direction.argmax()
-    x = self.bot.center_x + np.cos(i*np.pi / 4) * self.L
-    y = self.bot.center_y + np.sin(i*np.pi / 4) * self.L
-    print(p)
-    print(x, y)
+    if i <= 8:
+      x = self.bot.center_x + np.cos(i*np.pi / 4) * self.L
+      y = self.bot.center_y + np.sin(i*np.pi / 4) * self.L
+    else:
+      x = self.bot.center_x
+      y = self.bot.center_y
     pg.click(x=x, y=y, button=button)
     pg.PAUSE = tmp
+    print(p)
+    print(direction)
     return direction
 
 class DotaUI:
