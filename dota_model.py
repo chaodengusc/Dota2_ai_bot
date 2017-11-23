@@ -91,8 +91,8 @@ class DotaBot:
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
     self.memory = []
-    self.mouse_x = 96
-    self.mouse_y = 978
+    self.center_x = _width / 2
+    self.center_y = _height / 2
 
   ## interpret the commands and execute them
   def onestep(self):
@@ -107,7 +107,6 @@ class DotaBot:
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
     self.memory.append((p.copy(), meta.copy(), direction.copy()))
-    print(p)
 
   def get_parameters(self):
     return self.policy.paras
@@ -140,8 +139,8 @@ class BotPolicy:
   def forward(self, X):
     ## fully connected layer
     w_fc1 = self.paras['w_fc1']
-    print(w_fc1.shape)
     X_flatten = X.flatten(order='F')
+    X_flatten = np.matrix(X_flatten)
     fc1 = X_flatten.dot(w_fc1)
     ## relu
     fc1[fc1 < 0] = 0
@@ -162,23 +161,23 @@ class BotPolicy:
     reward = self.bot.env.reward
     X, fc1 = meta
     X_flatten = X.flatten(order='F')
+    X_flatten = np.matrix(X_flatten)
 
     i = direction.argmax()
     dp = np.zeros_like(p)
     for j in range(len(dp)):
       if j == i:
-        dp[j] = -(1 - p[i])
+        dp[0, j] = -(1 - p[0, i])
       else:
-        dp[j] = p[j]
-
-    dw_fc2 = fc1.T.multiply(dp) 
+        dp[0, j] = p[0, j]
+    dw_fc2 = fc1.T.dot(dp) 
     w_fc2 = self.paras["w_fc2"]
-    dx_fc2 = dp.multiply(w_fc2.T)
+    dx_fc2 = dp.dot(w_fc2.T)
 
     ## relu
     dx_fc2[dx_fc2 < 0] = 0
     ## the first layer
-    dw_fc1 = X_flatten.T.multiply(dx_fc2)
+    dw_fc1 = X_flatten.T.dot(dx_fc2)
     ## update the parameter
     self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
     self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
@@ -199,6 +198,8 @@ class BotPolicy:
     ## use the difference
     X = view1 - view2
     X = np.mean(X[:, :, 0:3], axis=2)
+    v = view1.copy()
+    v = np.mean(v[:, :, 0:3], axis=2)
     width_per_block, height_per_block = _width // 10, _height // 10
 
     for i in np.arange(0, _width, width_per_block):
@@ -210,13 +211,15 @@ class BotPolicy:
           X[i:i+width_per_block, j:j+height_per_block] = 0
     ## reduce the dimension of the input by a factor of scale**2
     X_reduce = np.zeros([_height // scale, _width // scale])
-    view1_reduce = np.zeros([_height // scale, _width // scale])
+    v_reduce = np.zeros([_height // scale, _width // scale])
     for i in np.arange(0, _height, scale):
       for j in np.arange(0, _width, scale):
         i = int(i); j = int(j)
-        X_reduce[i // scale, j // scale] = np.sum(X[i:i+scale, j:j+scale])
-        view1_reduce[i // scale, j // scale] = np.sum(view1[i:i+scale, j:j+scale])
-    return np.stack([X_reduce, view1_reduce], axis=2)
+        X_reduce[i // scale, j // scale] = np.mean(X[i:i+scale, j:j+scale])
+        v_reduce[i // scale, j // scale] = np.mean(v[i:i+scale, j:j+scale])
+    X_reduce /= 255
+    v_reduce /= 255
+    return np.stack([X_reduce, v_reduce], axis=2)
 
   def execute(self, p):
     center_hero()
@@ -230,11 +233,14 @@ class BotPolicy:
     else:
       button = 'right'
 
+    p = np.squeeze(np.asarray(p))
     direction = np.random.multinomial(1, p)
     i = direction.argmax()
-    self.bot.mouse_x += np.cos(i*np.pi / 4) * self.L
-    self.bot.mouse_y += np.sin(i*np.pi / 4) * self.L
-    pg.click(x=self.bot.mouse_x, y=self.bot.mouse_y, button=button)
+    x = self.bot.center_x + np.cos(i*np.pi / 4) * self.L
+    y = self.bot.center_y + np.sin(i*np.pi / 4) * self.L
+    print(p)
+    print(x, y)
+    pg.click(x=x, y=y, button=button)
     pg.PAUSE = tmp
     return direction
 
