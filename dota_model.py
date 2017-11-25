@@ -78,7 +78,7 @@ class DotaEnv:
     delta_ability = ability - self.ability
     if delta_gold < 20:
       delta_gold = 0
-    self.reward = delta_gold + delta_hp + 100 * delta_lvl + 50 * delta_ability
+    self.reward = delta_gold + delta_lvl * 100
     self.hp = hp
     self.lvl = lvl
     self.gold = gold
@@ -133,7 +133,7 @@ class BotPolicy:
       size=[_width // self.scale * _height // self.scale * 2, 100])
     ## output eight direction
     self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, \
-                                           size=[100, NUM_ACTIONS])
+                                           size=[100, self.NUM_ACTIONS])
     ## TODO: tune the parameters
     self.learning_rate = 1e-5
 
@@ -240,7 +240,7 @@ class BotPolicy:
     p = np.squeeze(np.asarray(p))
     direction = np.random.multinomial(1, p)
     i = direction.argmax()
-    if i <= 8:
+    if i <= 7:
       x = self.bot.center_x + np.cos(i*np.pi / 4) * self.L
       y = self.bot.center_y + np.sin(i*np.pi / 4) * self.L
     else:
@@ -256,7 +256,7 @@ class DotaUI:
   ## coordinates of key components in Dota 2
   CONTINUE = (956, 904)
   PLAY_DOTA = (1696, 1034)
-  CREATE_LOBBY = (1635, 610)
+  CREATE_LOBBY = (1660, 390)
   START_GAME = PLAY_DOTA
   MIRANA = (992, 417)
   SKIP_AHEAD = (163, 791)

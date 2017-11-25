@@ -11,7 +11,7 @@ class DotaGame:
   
   load_parameter = True
   is_train = False
-  battle_field = (96, 978)
+  battle_field = (107, 971)
   wraith_band = (1247, 770)
   def __init__(self):
     self.bot = DotaBot()
@@ -34,13 +34,15 @@ class DotaGame:
     x, y = UI.MIRANA; pg.click(x, y, button="left")
     x, y = UI.LOCK_IN; pg.click(x, y, button="left")
     pg.PAUSE = 10
-    x, y = self.wraith_band; click(x, y, button="right")
+    x, y = self.wraith_band; pg.click(x, y, button="right")
+    pg.PAUSE = 1
     x, y = UI.SKIP_AHEAD; pg.click(x, y, button="left")
     ## reset the time
     self.bot.env.over_time = 0
     ## move to the battle field
+    pg.PAUSE = 10
     x, y = self.battle_field; pg.click(x, y, button="right")
-    pg.PAUSE = 70
+    pg.PAUSE = 95
     pg.click(button="right")
     pg.PAUSE = tmp
     self.train()
