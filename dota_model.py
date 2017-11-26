@@ -81,7 +81,7 @@ class DotaEnv:
     ## only considering losing hp
     if delta_hp > 0:
       delta_hp = 0
-    self.reward = delta_gold + delta_lvl * 100 + delta_hp
+    self.reward = delta_gold * 2 + delta_lvl * 100 + delta_hp
     self.hp = hp
     self.lvl = lvl
     self.gold = gold
@@ -89,7 +89,7 @@ class DotaEnv:
 
 class DotaBot:
   MEMORY_LIMIT = 1000
-  MEMORY_RETRIEVAL = 5
+  MEMORY_RETRIEVAL = 6
   def __init__(self):
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
@@ -109,7 +109,7 @@ class DotaBot:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
-    self.memory.append((p.copy(), meta.copy(), direction.copy()))
+    self.memory.append([p.copy(), meta.copy(), direction.copy()])
 
   def get_parameters(self):
     return self.policy.paras
@@ -126,8 +126,11 @@ class DotaBot:
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   LEFT_PERCENT = 0.1
-  L = 480 # the attack range of the hero mirana
   NUM_ACTIONS = 9
+  ## add random walk to avoid local minima
+  RANDOM_PROB = 0.005
+  RANDOM_DIST = 450
+  RANDOM_PAUSE = 3
   def __init__(self, bot):
     self.bot = bot
     self.scale = 10 # scaling the screenshot to reduce the dimension
@@ -137,12 +140,16 @@ class BotPolicy:
     ## output eight direction
     self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, \
                                            size=[100, self.NUM_ACTIONS])
-    ## the maximum amount of gold at the end of the game in the history
-    self.paras['max_gold'] = GOLD_ 
+    ## the maximum score at the end of the game in the history
+    ## the formula is gold + 100 * lvl
+    self.paras['max_score'] = 1040
     ## TODO: tune the parameters
-    self.learning_rate = 1e-5
+    self.pause = 0.3
+    self.L = 100 # the attack range of the hero mirana
+    self.learning_rate = 0.00001
     self.batch_size = 50
-    self.standard_gold = 1090
+    ## the baseline score assuming that the bot did nothing
+    self.standard_score = 1040
 
   ## return the location of the click for a given state
   def forward(self, X):
@@ -197,7 +204,7 @@ class BotPolicy:
       dw_fc2 = np.zeros_like(self.paras['w_fc2'])
       l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
       for i in range(-1, -(l+1), -1):
-        p, meta, direction = self.bot.memory[i]
+        p, meta, direction, _ = self.bot.memory[i]
         x, y = self.backward(p, meta, direction)
         dw_fc1 += x
         dw_fc2 += y
@@ -205,41 +212,50 @@ class BotPolicy:
       dw_fc2 /= l
 
       ## update the parameter
-      self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
-      self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
+      self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward
+      self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * reward
 
 
   def global_optimizer(self):
     ## increase or desease the amount of gold compared with previous match
-    GOLD_ = self.paras['max_gold']
-    delta_gold = GOLD_ - self.bot.env.gold
+    max_score = self.paras['max_score']
     reward = 0
-    if self.bot.env.gold < self.bot.policy.standard_gold:
-      reward = -1 
-    elif self.bot.env.gold > GOLD_:
-      reward = 1
-    self.paras['max_gold'] = max(GOLD_, self.bot.env.gold)
+    score = self.bot.env.gold + 100 * self.bot.env.lvl
+    if score < self.bot.policy.standard_score:
+      reward = min(score - self.bot.policy.standard_score, -100)
+    elif score > max_score:
+      reward = score - max_score
+    self.paras['max_score'] = max(max_score, score)
     ## update the parameter if reward is nonzero
     if reward != 0:
-      ## STG
       batch_size = self.batch_size
-      batch = (len(self.bot.memory) - 1) // batch_size + 1
+      if reward > 0:
+        ## try to update effective actions
+        rewards = [i[3] for i in self.bot.memory]
+        pos_indexes = [k for k, v in enumerate(rewards) if v > 0]
+        if len(pos_indexes) > 0:
+          l = max(pos_indexes)
+        else:
+          l = len(self.bot.memory)
+      else:
+        l = len(self.bot.memory)
+      ## STG
+      batch = (l - 1) // batch_size + 1
       for i in range(batch):
         start = i * batch_size
         end = (i+1) * batch_size
         dw_fc1 = np.zeros_like(self.paras['w_fc1'])
         dw_fc2 = np.zeros_like(self.paras['w_fc2'])
-        for j in memory[start: end]:
-          p, meta, direction = self.bot.memory[j]
+        for j in self.bot.memory[start: end]:
+          p, meta, direction, _ = j
           x, y = self.backward(p, meta, direction) 
           dw_fc1 += x
           dw_fc2 += y
         dw_fc1 /= batch_size
         dw_fc2 /= batch_size
         ## update the parameter
-        self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
-        self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
- 
+        self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward 
+        self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * reward
 
   ## negative log likelihood
   def loss(self):
@@ -285,7 +301,7 @@ class BotPolicy:
     center_hero()
     ## TODO: tune the parameter
     tmp = pg.PAUSE
-    pg.PAUSE = 1.6
+    pg.PAUSE = self.pause
     ## left click happens rare in this case
 
     # if np.random.binomial(1, self.LEFT_PERCENT) == 1:
@@ -294,18 +310,25 @@ class BotPolicy:
     #   button = 'right'
     button = 'right'
 
-    p = np.squeeze(np.asarray(p))
-    direction = np.random.multinomial(1, p)
+    # add randomness to avoid local minimum
+    if np.random.binomial(1, self.RANDOM_PROB) == 1:
+      print("random walk")
+      direction = np.random.multinomial(1, [1.0/self.NUM_ACTIONS]*self.NUM_ACTIONS, size=1)
+      pg.PAUSE = self.RANDOM_PAUSE
+      L = self.RANDOM_DIST
+    else:
+      p = np.squeeze(np.asarray(p))
+      direction = np.random.multinomial(1, p)
+      L = self.L
     i = direction.argmax()
     if i <= 7:
-      x = self.bot.center_x + np.cos(i*np.pi / 4) * self.L
-      y = self.bot.center_y + np.sin(i*np.pi / 4) * self.L
+      x = self.bot.center_x + np.cos(i*np.pi / 4) * L
+      y = self.bot.center_y + np.sin(i*np.pi / 4) * L
     else:
       x = self.bot.center_x
       y = self.bot.center_y
     pg.click(x=x, y=y, button=button)
     pg.PAUSE = tmp
-    print(self.bot.env.reward)
     print(p)
     print(direction)
     return direction
@@ -317,6 +340,8 @@ class DotaUI:
   CREATE_LOBBY = (1660, 390)
   START_GAME = PLAY_DOTA
   MIRANA = (992, 417)
+  BREWMASTER = (411, 226)
+  THIRD_ABILITY = (1003, 921)
   SKIP_AHEAD = (163, 791)
   BACK_TO_DASHBOARD = (31, 27)
   DISCONNECT = (1676, 1036)

@@ -11,13 +11,16 @@ class DotaGame:
   
   load_parameter = True
   is_train = False
-  battle_field = (107, 971)
+  battle_field = (110, 971)
   wraith_band = (1247, 770)
+  bracer = (1335, 770)
+  iron_branch = (1292, 598)
   def __init__(self):
     self.bot = DotaBot()
     self.count = 1
     self.rewards = []
     self.golds = []
+    self.scores = []
 
   def relaunch(self):
     tmp = pg.PAUSE
@@ -31,11 +34,12 @@ class DotaGame:
     pg.PAUSE = 12
     x, y = UI.START_GAME; pg.click(x, y, button="left")
     pg.PAUSE = 2
-    x, y = UI.MIRANA; pg.click(x, y, button="left")
+    x, y = UI.BREWMASTER; pg.click(x, y, button="left")
     x, y = UI.LOCK_IN; pg.click(x, y, button="left")
     pg.PAUSE = 10
-    x, y = self.wraith_band; pg.click(x, y, button="right")
+    x, y = self.bracer; pg.click(x, y, button="right")
     pg.PAUSE = 1
+    x, y = self.iron_branch; pg.click(x, y, button="right", clicks=3, interval=0.5)
     x, y = UI.SKIP_AHEAD; pg.click(x, y, button="left")
     ## reset the time
     self.bot.env.over_time = 0
@@ -45,6 +49,7 @@ class DotaGame:
     pg.PAUSE = 95
     pg.click(button="right")
     pg.PAUSE = tmp
+    x, y = UI.THIRD_ABILITY; pg.click(x, y, button="left")
     self.train()
 
   def train(self):
@@ -56,9 +61,11 @@ class DotaGame:
         para = np.load("train_parameters.npy").item()
         self.bot.set_parameters(para)
       while not self.bot.env.over_time:
-        reward = self.bot.env.reward
         meta = self.bot.onestep()
         self.bot.env.update()
+        reward = self.bot.env.reward
+	## let bot remember the reward
+        self.bot.memory[-1].append(reward)
         ## instant reward
         self.bot.policy.local_optimizer()
         iter_count += 1
@@ -68,12 +75,14 @@ class DotaGame:
       ## reward at the end of game
       self.bot.policy.global_optimizer()
       self.golds.append(self.bot.env.gold)
+      self.scores.append(self.bot.env.gold + 100 * self.bot.env.lvl)
       self.count += 1
       if self.count % 5 == 0:
         tmp = strftime("%d-%b-%Y", gmtime())
         with open('result_'+tmp+'-'+str(self.count), 'wb') as output:
           pickle.dump(self.golds, output)
           pickle.dump(self.rewards, output)
+          pickle.dump(self.scores, output)
         paras = self.bot.get_parameters()
         np.save('train_parameters', paras)
         
