@@ -78,15 +78,18 @@ class DotaEnv:
     delta_ability = ability - self.ability
     if delta_gold < 20:
       delta_gold = 0
-    self.reward = delta_gold + delta_lvl * 100
+    ## only considering losing hp
+    if delta_hp > 0:
+      delta_hp = 0
+    self.reward = delta_gold + delta_lvl * 100 + delta_hp
     self.hp = hp
     self.lvl = lvl
     self.gold = gold
     self.ability = ability
 
 class DotaBot:
-  MEMORY_LIMIT = 20
-  MEMORY_RETRIEVAL = 10
+  MEMORY_LIMIT = 1000
+  MEMORY_RETRIEVAL = 5
   def __init__(self):
     self.env = DotaEnv()
     self.policy = BotPolicy(self)
@@ -134,8 +137,12 @@ class BotPolicy:
     ## output eight direction
     self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, \
                                            size=[100, self.NUM_ACTIONS])
+    ## the maximum amount of gold at the end of the game in the history
+    self.paras['max_gold'] = GOLD_ 
     ## TODO: tune the parameters
     self.learning_rate = 1e-5
+    self.batch_size = 50
+    self.standard_gold = 1090
 
   ## return the location of the click for a given state
   def forward(self, X):
@@ -159,7 +166,7 @@ class BotPolicy:
     return p, meta
 
   ## return the gradient of parameters
-  def optimizer(self, p, meta, direction):
+  def backward(self, p, meta, direction):
     reward = self.bot.env.reward
     X, fc1 = meta
     X_flatten = X.flatten(order='F')
@@ -180,9 +187,59 @@ class BotPolicy:
     dx_fc2[dx_fc2 < 0] = 0
     ## the first layer
     dw_fc1 = X_flatten.T.dot(dx_fc2)
-    ## update the parameter
-    self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
-    self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
+
+    return (dw_fc1, dw_fc2)
+
+  def local_optimizer(self):
+    reward = self.bot.env.reward
+    if reward != 0:
+      dw_fc1 = np.zeros_like(self.paras['w_fc1'])
+      dw_fc2 = np.zeros_like(self.paras['w_fc2'])
+      l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
+      for i in range(-1, -(l+1), -1):
+        p, meta, direction = self.bot.memory[i]
+        x, y = self.backward(p, meta, direction)
+        dw_fc1 += x
+        dw_fc2 += y
+      dw_fc1 /= l
+      dw_fc2 /= l
+
+      ## update the parameter
+      self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
+      self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
+
+
+  def global_optimizer(self):
+    ## increase or desease the amount of gold compared with previous match
+    GOLD_ = self.paras['max_gold']
+    delta_gold = GOLD_ - self.bot.env.gold
+    reward = 0
+    if self.bot.env.gold < self.bot.policy.standard_gold:
+      reward = -1 
+    elif self.bot.env.gold > GOLD_:
+      reward = 1
+    self.paras['max_gold'] = max(GOLD_, self.bot.env.gold)
+    ## update the parameter if reward is nonzero
+    if reward != 0:
+      ## STG
+      batch_size = self.batch_size
+      batch = (len(self.bot.memory) - 1) // batch_size + 1
+      for i in range(batch):
+        start = i * batch_size
+        end = (i+1) * batch_size
+        dw_fc1 = np.zeros_like(self.paras['w_fc1'])
+        dw_fc2 = np.zeros_like(self.paras['w_fc2'])
+        for j in memory[start: end]:
+          p, meta, direction = self.bot.memory[j]
+          x, y = self.backward(p, meta, direction) 
+          dw_fc1 += x
+          dw_fc2 += y
+        dw_fc1 /= batch_size
+        dw_fc2 /= batch_size
+        ## update the parameter
+        self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * np.sign(reward)
+        self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * np.sign(reward)
+ 
 
   ## negative log likelihood
   def loss(self):
@@ -248,6 +305,7 @@ class BotPolicy:
       y = self.bot.center_y
     pg.click(x=x, y=y, button=button)
     pg.PAUSE = tmp
+    print(self.bot.env.reward)
     print(p)
     print(direction)
     return direction

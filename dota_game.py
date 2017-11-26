@@ -56,18 +56,17 @@ class DotaGame:
         para = np.load("train_parameters.npy").item()
         self.bot.set_parameters(para)
       while not self.bot.env.over_time:
+        reward = self.bot.env.reward
         meta = self.bot.onestep()
         self.bot.env.update()
-        reward = self.bot.env.reward
-        if reward != 0:
-          l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
-          for i in range(-1, -(l+1), -1):
-            p, meta, direction = self.bot.memory[i]
-            self.bot.policy.optimizer(p, meta, direction)
+        ## instant reward
+        self.bot.policy.local_optimizer()
         iter_count += 1
         if iter_count % 10 == 0:
           self.rewards.append(reward)
-
+      
+      ## reward at the end of game
+      self.bot.policy.global_optimizer()
       self.golds.append(self.bot.env.gold)
       self.count += 1
       if self.count % 5 == 0:
