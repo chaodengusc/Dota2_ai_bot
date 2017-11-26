@@ -126,7 +126,7 @@ class DotaBot:
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   LEFT_PERCENT = 0.1
-  NUM_ACTIONS = 9
+  NUM_ACTIONS = 10
   ## add random walk to avoid local minima
   RANDOM_PROB = 0.005
   RANDOM_DIST = 450
@@ -140,17 +140,14 @@ class BotPolicy:
     ## output eight direction
     self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, \
                                            size=[100, self.NUM_ACTIONS])
-    ## output the step size
-    self.paras['w_fc3'] = np.random.normal(loc=0, scale=0.05, \
-      size=[_width // self.scale * _height // self.scale * 2, 1])
     ## the maximum score at the end of the game in the history
     ## the formula is gold + 100 * lvl
     self.paras['max_score'] = 1040
     ## TODO: tune the parameters
     self.battle_pause = 0.3
     self.battle_L = 100 
-    self.walk_pause = 1.8
-    self.walk_L = 400 
+    self.walk_pause = 1.3
+    self.walk_L = 300 
     self.learning_rate = 0.00001
     self.batch_size = 50
     ## the baseline score assuming that the bot did nothing
@@ -169,16 +166,16 @@ class BotPolicy:
     w_fc2 = self.paras['w_fc2']
     fc2 = fc1.dot(w_fc2)
     ## stable softmax
-    fc2 -= np.max(fc2)
+    fc2_p = fc2[0, 0:9]
+    fc2_p -= np.max(fc2_p)
+    fc2_mode = fc2[0, 9]
     ## probability of taking each direction
-    p = np.exp(fc2)
+    p = np.exp(fc2_p)
     p = p / np.sum(p)
     ## store results for backpropogation
     meta = [X, fc1]
     ## step size
-    w_fc3 = self.paras['w_fc3']
-    fc3 = X_flatten.dot(w_fc3)
-    prob_mode = 1 / (1 + np.exp(-fc3))
+    prob_mode = 1 / (1 + np.exp(-fc2_mode))
     return p, meta, prob_mode
 
   ## return the gradient of parameters
@@ -195,23 +192,30 @@ class BotPolicy:
         dp[0, j] = -(1 - p[0, i])
       else:
         dp[0, j] = p[0, j]
+    print(fc1.shape)
+    print(dp.shape)
     dw_fc2 = fc1.T.dot(dp) 
     w_fc2 = self.paras["w_fc2"]
-    dx_fc2 = dp.dot(w_fc2.T)
+    dx_fc2 = dp.dot(w_fc2.T[0:9, :])
+
+    ## step_size
+    if mode == 1:
+      dprob_mode = -(1 - prob_mode)
+    else:
+      dprob_mode = prob_mode / (self.walk_pause / self.battle_pause)
+    print(dw_fc2.shape)
+    print((fc1.T.dot(np.matrix(dprob_mode))).shape)
+    dw_fc2 = np.concatenate([dw_fc2, fc1.T.dot(np.matrix(dprob_mode))], axis=1)
+    print(dw_fc2.shape)
+    dx_fc2 += np.matrix(dprob_mode) * w_fc2.T[9, :]
+    print(dx_fc2.shape)
 
     ## relu
     dx_fc2[dx_fc2 < 0] = 0
     ## the first layer
     dw_fc1 = X_flatten.T.dot(dx_fc2)
-    
-    ## step_size
-    if mode == 1:
-      dprob_mode = -(1 - prob_mode)
-    else:
-      dprob_mode = prob_mode
-    dw_fc3 = X_flatten.T.dot(dprob_mode)
 
-    return (dw_fc1, dw_fc2, dw_fc3)
+    return (dw_fc1, dw_fc2)
 
   def local_optimizer(self):
     reward = self.bot.env.reward
@@ -219,22 +223,18 @@ class BotPolicy:
       print(reward)
       dw_fc1 = np.zeros_like(self.paras['w_fc1'])
       dw_fc2 = np.zeros_like(self.paras['w_fc2'])
-      dw_fc3 = np.zeros_like(self.paras['w_fc3'])
       l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
       for i in range(-1, -(l+1), -1):
         p, meta, direction, prob_mode, mode, _ = self.bot.memory[i]
-        x, y, z= self.backward(p, meta, direction, prob_mode, mode)
+        x, y= self.backward(p, meta, direction, prob_mode, mode)
         dw_fc1 += x
         dw_fc2 += y
-        dw_fc3 += z
       dw_fc1 /= l
       dw_fc2 /= l
-      dw_fc3 /= l
 
       ## update the parameter
       self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward
       self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * reward
-      self.paras['w_fc3'] -= dw_fc3 * self.learning_rate * reward
 
 
   def global_optimizer(self):
@@ -267,20 +267,16 @@ class BotPolicy:
         end = (i+1) * batch_size
         dw_fc1 = np.zeros_like(self.paras['w_fc1'])
         dw_fc2 = np.zeros_like(self.paras['w_fc2'])
-        dw_fc3 = np.zeros_like(self.paras['w_fc3'])
         for j in self.bot.memory[start: end]:
           p, meta, direction, prob_mode, mode, _ = j
-          x, y, z= self.backward(p, meta, direction, prob_mode, mode) 
+          x, y= self.backward(p, meta, direction, prob_mode, mode) 
           dw_fc1 += x
           dw_fc2 += y
-          dw_fc3 += z
         dw_fc1 /= batch_size
         dw_fc2 /= batch_size
-        dw_fc3 /= batch_size
         ## update the parameter
         self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward 
         self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * reward
-        self.paras['w_fc3'] -= dw_fc3 * self.learning_rate * reward
 
   ## negative log likelihood
   def loss(self):
