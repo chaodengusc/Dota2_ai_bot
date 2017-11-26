@@ -103,13 +103,13 @@ class DotaBot:
     views = self.env.views
     policy = self.policy
     X = policy.get_state(views[-1], views[-2], self.policy.scale)
-    p, meta = policy.forward(X)
-    direction = policy.execute(p)
+    p, meta, prob_mode = policy.forward(X)
+    direction, mode = policy.execute(p, prob_mode)
     if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
-    self.memory.append([p.copy(), meta.copy(), direction.copy()])
+    self.memory.append([p.copy(), meta.copy(), direction.copy(), prob_mode, mode])
 
   def get_parameters(self):
     return self.policy.paras
@@ -140,12 +140,17 @@ class BotPolicy:
     ## output eight direction
     self.paras['w_fc2'] = np.random.normal(loc=0, scale=0.05, \
                                            size=[100, self.NUM_ACTIONS])
+    ## output the step size
+    self.paras['w_fc3'] = np.random.normal(loc=0, scale=0.05, \
+      size=[_width // self.scale * _height // self.scale * 2, 1])
     ## the maximum score at the end of the game in the history
     ## the formula is gold + 100 * lvl
     self.paras['max_score'] = 1040
     ## TODO: tune the parameters
-    self.pause = 0.3
-    self.L = 100 # the attack range of the hero mirana
+    self.battle_pause = 0.3
+    self.battle_L = 100 
+    self.walk_pause = 1.8
+    self.walk_L = 400 
     self.learning_rate = 0.00001
     self.batch_size = 50
     ## the baseline score assuming that the bot did nothing
@@ -170,10 +175,14 @@ class BotPolicy:
     p = p / np.sum(p)
     ## store results for backpropogation
     meta = [X, fc1]
-    return p, meta
+    ## step size
+    w_fc3 = self.paras['w_fc3']
+    fc3 = X_flatten.dot(w_fc3)
+    prob_mode = 1 / (1 + np.exp(-fc3))
+    return p, meta, prob_mode
 
   ## return the gradient of parameters
-  def backward(self, p, meta, direction):
+  def backward(self, p, meta, direction, prob_mode, mode):
     reward = self.bot.env.reward
     X, fc1 = meta
     X_flatten = X.flatten(order='F')
@@ -194,26 +203,38 @@ class BotPolicy:
     dx_fc2[dx_fc2 < 0] = 0
     ## the first layer
     dw_fc1 = X_flatten.T.dot(dx_fc2)
+    
+    ## step_size
+    if mode == 1:
+      dprob_mode = -(1 - prob_mode)
+    else:
+      dprob_mode = prob_mode
+    dw_fc3 = X_flatten.T.dot(dprob_mode)
 
-    return (dw_fc1, dw_fc2)
+    return (dw_fc1, dw_fc2, dw_fc3)
 
   def local_optimizer(self):
     reward = self.bot.env.reward
     if reward != 0:
+      print(reward)
       dw_fc1 = np.zeros_like(self.paras['w_fc1'])
       dw_fc2 = np.zeros_like(self.paras['w_fc2'])
+      dw_fc3 = np.zeros_like(self.paras['w_fc3'])
       l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
       for i in range(-1, -(l+1), -1):
-        p, meta, direction, _ = self.bot.memory[i]
-        x, y = self.backward(p, meta, direction)
+        p, meta, direction, prob_mode, mode, _ = self.bot.memory[i]
+        x, y, z= self.backward(p, meta, direction, prob_mode, mode)
         dw_fc1 += x
         dw_fc2 += y
+        dw_fc3 += z
       dw_fc1 /= l
       dw_fc2 /= l
+      dw_fc3 /= l
 
       ## update the parameter
       self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward
       self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * reward
+      self.paras['w_fc3'] -= dw_fc3 * self.learning_rate * reward
 
 
   def global_optimizer(self):
@@ -246,16 +267,20 @@ class BotPolicy:
         end = (i+1) * batch_size
         dw_fc1 = np.zeros_like(self.paras['w_fc1'])
         dw_fc2 = np.zeros_like(self.paras['w_fc2'])
+        dw_fc3 = np.zeros_like(self.paras['w_fc3'])
         for j in self.bot.memory[start: end]:
-          p, meta, direction, _ = j
-          x, y = self.backward(p, meta, direction) 
+          p, meta, direction, prob_mode, mode, _ = j
+          x, y, z= self.backward(p, meta, direction, prob_mode, mode) 
           dw_fc1 += x
           dw_fc2 += y
+          dw_fc3 += z
         dw_fc1 /= batch_size
         dw_fc2 /= batch_size
+        dw_fc3 /= batch_size
         ## update the parameter
         self.paras['w_fc1'] -= dw_fc1 * self.learning_rate * reward 
         self.paras['w_fc2'] -= dw_fc2 * self.learning_rate * reward
+        self.paras['w_fc3'] -= dw_fc3 * self.learning_rate * reward
 
   ## negative log likelihood
   def loss(self):
@@ -263,11 +288,11 @@ class BotPolicy:
     reward = self.bot.env.reward
     logp = 0
     for i in range(-1, -(l+1), -1):
-      p, meta, direction = self.bot.memory[i]
+      p, meta, direction, prob_mode, mode, _ = self.bot.memory[i]
       prob = p.dot(direction)
-      logp += np.log(prob)
+      logp += np.log(prob) + np.log(mode * prob_mode + (1 - mode) * (1 - prob_mode)) 
 
-    return -logp * np.sign(reward)
+    return -logp * reward
 
   def get_state(self, view1, view2, scale):
     ## use the difference
@@ -297,11 +322,10 @@ class BotPolicy:
     v_reduce /= 255
     return np.stack([X_reduce, v_reduce], axis=2)
 
-  def execute(self, p):
+  def execute(self, p, prob_mode):
     center_hero()
     ## TODO: tune the parameter
     tmp = pg.PAUSE
-    pg.PAUSE = self.pause
     ## left click happens rare in this case
 
     # if np.random.binomial(1, self.LEFT_PERCENT) == 1:
@@ -316,10 +340,17 @@ class BotPolicy:
       direction = np.random.multinomial(1, [1.0/self.NUM_ACTIONS]*self.NUM_ACTIONS, size=1)
       pg.PAUSE = self.RANDOM_PAUSE
       L = self.RANDOM_DIST
+      mode = 0
     else:
       p = np.squeeze(np.asarray(p))
       direction = np.random.multinomial(1, p)
-      L = self.L
+      mode = np.random.binomial(1, prob_mode)
+      if mode == 1:
+        L = self.battle_L
+        pg.PAUSE = self.battle_pause
+      else:
+        L = self.walk_L
+        pg.PAUSE = self.walk_pause
     i = direction.argmax()
     if i <= 7:
       x = self.bot.center_x + np.cos(i*np.pi / 4) * L
@@ -331,7 +362,9 @@ class BotPolicy:
     pg.PAUSE = tmp
     print(p)
     print(direction)
-    return direction
+    print(prob_mode) 
+    print(mode)
+    return direction, mode
 
 class DotaUI:
   ## coordinates of key components in Dota 2
