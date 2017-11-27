@@ -5,6 +5,7 @@ import numpy as np
 from dota_model import DotaBot
 from time import gmtime, strftime
 import pickle
+import scipy.misc
 
 
 class DotaGame:
@@ -77,8 +78,9 @@ class DotaGame:
       self.golds.append(self.bot.env.gold)
       self.scores.append(self.bot.env.gold + 100 * self.bot.env.lvl)
       self.count += 1
+      tmp = strftime("%d-%b-%Y", gmtime())
+      scipy.misc.imsave('./screenshots/'+tmp+str(self.count)+'.jpg', self.bot.env.UI.view)
       if self.count % 5 == 0:
-        tmp = strftime("%d-%b-%Y", gmtime())
         with open('result_'+tmp+'-'+str(self.count), 'wb') as output:
           pickle.dump(self.golds, output)
           pickle.dump(self.rewards, output)

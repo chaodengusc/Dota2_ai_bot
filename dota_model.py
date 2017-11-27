@@ -103,13 +103,13 @@ class DotaBot:
     views = self.env.views
     policy = self.policy
     X = policy.get_state(views[-1], views[-2], self.policy.scale)
-    p, meta, prob_mode = policy.forward(X)
-    direction, mode = policy.execute(p, prob_mode)
+    p, meta = policy.forward(X)
+    direction = policy.execute(p)
     if len(self.memory) >= self.MEMORY_LIMIT:
       ## randomly throw away old record
       i = np.random.randint(len(self.memory) - self.MEMORY_RETRIEVAL)
       self.memory.pop(i)
-    self.memory.append([p.copy(), meta.copy(), direction.copy(), prob_mode, mode])
+    self.memory.append([p.copy(), meta.copy(), direction.copy()])
 
   def get_parameters(self):
     return self.policy.paras
@@ -126,7 +126,7 @@ class DotaBot:
 class BotPolicy:
   BLACKPIXEL_PERCENT = 0.95
   LEFT_PERCENT = 0.1
-  NUM_ACTIONS = 10
+  NUM_ACTIONS = 9
   ## add random walk to avoid local minima
   RANDOM_PROB = 0.005
   RANDOM_DIST = 450
@@ -151,7 +151,7 @@ class BotPolicy:
     self.learning_rate = 0.00001
     self.batch_size = 50
     ## the baseline score assuming that the bot did nothing
-    self.standard_score = 1040
+    self.standard_score = 1140
 
   ## return the location of the click for a given state
   def forward(self, X):
@@ -166,20 +166,15 @@ class BotPolicy:
     w_fc2 = self.paras['w_fc2']
     fc2 = fc1.dot(w_fc2)
     ## stable softmax
-    fc2_p = fc2[0, 0:9]
-    fc2_p -= np.max(fc2_p)
-    fc2_mode = fc2[0, 9]
-    ## probability of taking each direction
-    p = np.exp(fc2_p)
+    fc2 -= np.max(fc2)
+    p = np.exp(fc2)
     p = p / np.sum(p)
     ## store results for backpropogation
     meta = [X, fc1]
-    ## step size
-    prob_mode = 1 / (1 + np.exp(-fc2_mode))
-    return p, meta, prob_mode
+    return p, meta
 
   ## return the gradient of parameters
-  def backward(self, p, meta, direction, prob_mode, mode):
+  def backward(self, p, meta, direction):
     reward = self.bot.env.reward
     X, fc1 = meta
     X_flatten = X.flatten(order='F')
@@ -192,23 +187,9 @@ class BotPolicy:
         dp[0, j] = -(1 - p[0, i])
       else:
         dp[0, j] = p[0, j]
-    print(fc1.shape)
-    print(dp.shape)
     dw_fc2 = fc1.T.dot(dp) 
     w_fc2 = self.paras["w_fc2"]
-    dx_fc2 = dp.dot(w_fc2.T[0:9, :])
-
-    ## step_size
-    if mode == 1:
-      dprob_mode = -(1 - prob_mode)
-    else:
-      dprob_mode = prob_mode / (self.walk_pause / self.battle_pause)
-    print(dw_fc2.shape)
-    print((fc1.T.dot(np.matrix(dprob_mode))).shape)
-    dw_fc2 = np.concatenate([dw_fc2, fc1.T.dot(np.matrix(dprob_mode))], axis=1)
-    print(dw_fc2.shape)
-    dx_fc2 += np.matrix(dprob_mode) * w_fc2.T[9, :]
-    print(dx_fc2.shape)
+    dx_fc2 = dp.dot(w_fc2.T)
 
     ## relu
     dx_fc2[dx_fc2 < 0] = 0
@@ -220,13 +201,13 @@ class BotPolicy:
   def local_optimizer(self):
     reward = self.bot.env.reward
     if reward != 0:
-      print(reward)
+      print("reward is ", reward)
       dw_fc1 = np.zeros_like(self.paras['w_fc1'])
       dw_fc2 = np.zeros_like(self.paras['w_fc2'])
       l = min(len(self.bot.memory), self.bot.MEMORY_RETRIEVAL)
       for i in range(-1, -(l+1), -1):
-        p, meta, direction, prob_mode, mode, _ = self.bot.memory[i]
-        x, y= self.backward(p, meta, direction, prob_mode, mode)
+        p, meta, direction, _ = self.bot.memory[i]
+        x, y= self.backward(p, meta, direction)
         dw_fc1 += x
         dw_fc2 += y
       dw_fc1 /= l
@@ -247,6 +228,7 @@ class BotPolicy:
     elif score > max_score:
       reward = score - max_score
     self.paras['max_score'] = max(max_score, score)
+    print("overall reward is ", reward)
     ## update the parameter if reward is nonzero
     if reward != 0:
       batch_size = self.batch_size
@@ -268,8 +250,8 @@ class BotPolicy:
         dw_fc1 = np.zeros_like(self.paras['w_fc1'])
         dw_fc2 = np.zeros_like(self.paras['w_fc2'])
         for j in self.bot.memory[start: end]:
-          p, meta, direction, prob_mode, mode, _ = j
-          x, y= self.backward(p, meta, direction, prob_mode, mode) 
+          p, meta, direction, _ = j
+          x, y= self.backward(p, meta, direction) 
           dw_fc1 += x
           dw_fc2 += y
         dw_fc1 /= batch_size
@@ -284,9 +266,9 @@ class BotPolicy:
     reward = self.bot.env.reward
     logp = 0
     for i in range(-1, -(l+1), -1):
-      p, meta, direction, prob_mode, mode, _ = self.bot.memory[i]
+      p, meta, direction, _ = self.bot.memory[i]
       prob = p.dot(direction)
-      logp += np.log(prob) + np.log(mode * prob_mode + (1 - mode) * (1 - prob_mode)) 
+      logp += np.log(prob) 
 
     return -logp * reward
 
@@ -318,7 +300,7 @@ class BotPolicy:
     v_reduce /= 255
     return np.stack([X_reduce, v_reduce], axis=2)
 
-  def execute(self, p, prob_mode):
+  def execute(self, p):
     center_hero()
     ## TODO: tune the parameter
     tmp = pg.PAUSE
@@ -336,17 +318,11 @@ class BotPolicy:
       direction = np.random.multinomial(1, [1.0/self.NUM_ACTIONS]*self.NUM_ACTIONS, size=1)
       pg.PAUSE = self.RANDOM_PAUSE
       L = self.RANDOM_DIST
-      mode = 0
     else:
       p = np.squeeze(np.asarray(p))
       direction = np.random.multinomial(1, p)
-      mode = np.random.binomial(1, prob_mode)
-      if mode == 1:
-        L = self.battle_L
-        pg.PAUSE = self.battle_pause
-      else:
-        L = self.walk_L
-        pg.PAUSE = self.walk_pause
+      L = self.battle_L
+      pg.PAUSE = self.battle_pause
     i = direction.argmax()
     if i <= 7:
       x = self.bot.center_x + np.cos(i*np.pi / 4) * L
@@ -356,11 +332,8 @@ class BotPolicy:
       y = self.bot.center_y
     pg.click(x=x, y=y, button=button)
     pg.PAUSE = tmp
-    print(p)
-    print(direction)
-    print(prob_mode) 
-    print(mode)
-    return direction, mode
+    print("command:", p, direction)
+    return direction
 
 class DotaUI:
   ## coordinates of key components in Dota 2
