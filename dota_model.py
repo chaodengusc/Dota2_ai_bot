@@ -313,16 +313,20 @@ class BotPolicy:
     button = 'right'
 
     # add randomness to avoid local minimum
-    if np.random.binomial(1, self.RANDOM_PROB) == 1:
-      print("random walk")
-      direction = np.random.multinomial(1, [1.0/self.NUM_ACTIONS]*self.NUM_ACTIONS, size=1)
-      pg.PAUSE = self.RANDOM_PAUSE
-      L = self.RANDOM_DIST
-    else:
-      p = np.squeeze(np.asarray(p))
-      direction = np.random.multinomial(1, p)
-      L = self.battle_L
-      pg.PAUSE = self.battle_pause
+    #if np.random.binomial(1, self.RANDOM_PROB) == 1:
+    #  print("random walk")
+    #  direction = np.random.multinomial(1, [1.0/self.NUM_ACTIONS]*self.NUM_ACTIONS, size=1)
+    #  pg.PAUSE = self.RANDOM_PAUSE
+    #  L = self.RANDOM_DIST
+    #else:
+    #  p = np.squeeze(np.asarray(p))
+    #  direction = np.random.multinomial(1, p)
+    #  L = self.battle_L
+    #  pg.PAUSE = self.battle_pause
+    p = np.squeeze(np.asarray(p))
+    direction = np.random.multinomial(1, p)
+    L = self.battle_L
+    pg.PAUSE = self.battle_pause
     i = direction.argmax()
     if i <= 7:
       x = self.bot.center_x + np.cos(i*np.pi / 4) * L
